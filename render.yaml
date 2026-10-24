@@ -1,7 +1,7 @@
 # Blueprint de Render para la API de Enlace Clínico (el frontend vive en Netlify)
 services:
   - type: web
-    name: enlace-clinico-api
+    name: enlace-clinico
     runtime: node
     rootDir: backend
     buildCommand: npm ci
