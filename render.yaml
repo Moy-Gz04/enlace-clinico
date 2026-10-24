@@ -1,0 +1,20 @@
+# Blueprint de Render para la API de Enlace Clínico (el frontend vive en Netlify)
+services:
+  - type: web
+    name: enlace-clinico-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/salud
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: TICKET_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://enlace-clinico.netlify.app
