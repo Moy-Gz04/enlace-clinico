@@ -420,6 +420,7 @@ function marcoAcceso(contenido){
     <main class="acc-main">
       <div class="acc-col">${contenido}</div>
       <aside class="acc-info" aria-label="Acerca del servicio">
+        <img class="acc-portada" src="assets/portada.jpg" alt="Assistant · Asistentes en línea">
         <h2>Recepción médica para consultorios</h2>
         <dl>
           <div><dt>Para la recepción</dt><dd>Agenda citas en el horario de cada médico, emite tickets con QR y lleva el control de mensualidades.</dd></div>
