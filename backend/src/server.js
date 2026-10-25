@@ -50,7 +50,7 @@ async function auth(req, res, next) {
     if (!u || !u.activo || u.sesion_ver !== p.v) return res.status(401).json({ error: "Tu sesión terminó. Vuelve a entrar." });
     req.u = { id: u.id, usuario: u.usuario, rol: u.rol, doctorId: u.doctor_id, debeCambiar: u.debe_cambiar };
     // con contraseña temporal solo se permite cambiarla
-    if (u.debe_cambiar && !req.path.startsWith("/auth/")) return res.status(403).json({ error: "Primero cambia tu contraseña temporal." });
+    if (u.debe_cambiar && !req.originalUrl.startsWith("/api/auth/")) return res.status(403).json({ error: "Primero cambia tu contraseña temporal." });
     next();
   } catch { res.status(401).json({ error: "Tu sesión terminó. Vuelve a entrar." }); }
 }

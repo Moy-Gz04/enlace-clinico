@@ -136,18 +136,33 @@ function leerCodigo(t){
 
 /* ================= almacén de pruebas (localStorage) ================= */
 const API = String(window.EC_API || "").replace(/\/$/, "");
+/* Ventana de "cargando": aparece si una operación con el servidor tarda más
+   de medio segundo, bloquea la pantalla mientras tanto y dice qué ocurre. */
+const Cargando = (() => {
+  let n = 0, timer = null, lento = null, el = null, texto = "Cargando…";
+  const crear = () => { el = document.createElement("div"); el.className = "cargando"; el.setAttribute("role","status"); el.setAttribute("aria-live","polite");
+    el.innerHTML = `<div class="cargando-caja"><span class="cargando-marca">${typeof ICON!=="undefined"?ICON.marca:""}</span><span class="cargando-barra"><i></i></span><b></b><small>Un momento, por favor.</small></div>`; document.body.appendChild(el); };
+  const mostrar = () => { if(!el) crear(); el.querySelector("b").textContent = texto; el.querySelector("small").textContent = "Un momento, por favor."; el.classList.add("visible");
+    lento = setTimeout(()=>{ if(el) el.querySelector("small").textContent = "El servidor está despertando; puede tardar hasta un minuto la primera vez."; }, 6000); };
+  return {
+    inicio(t){ texto = t || texto; if(n++ === 0){ clearTimeout(timer); timer = setTimeout(mostrar, 450); } else if(el?.classList.contains("visible")) el.querySelector("b").textContent = texto; },
+    fin(){ if(n === 0) return; if(--n === 0){ clearTimeout(timer); clearTimeout(lento); el?.classList.remove("visible"); } },
+  };
+})();
 const TOKEN_KEY = "enlace-clinico:token";
 const Store = (() => {
   const COLS = ["doctores","citas","planes","solicitudes","mensajes"];
   let datos = null, base = {}, token = null, version = "", cola = Promise.resolve(true), sincronizando = false;
   try{ token = sessionStorage.getItem(TOKEN_KEY); }catch(e){}
   const foto = () => { base = {}; COLS.forEach(c=>{ base[c] = new Map((datos[c]||[]).map(x=>[x.id, JSON.stringify(x)])); }); };
-  async function api(metodo, ruta, cuerpo){
+  async function api(metodo, ruta, cuerpo, opc={}){
     let r;
+    if(!opc.silencioso) Cargando.inicio(opc.texto || (metodo==="GET" ? "Cargando…" : metodo==="DELETE" ? "Eliminando…" : "Guardando…"));
     try{
       r = await fetch(`${API}/api${ruta}`, { method:metodo, headers:{ ...(cuerpo!==undefined?{"Content-Type":"application/json"}:{}), ...(token?{Authorization:`Bearer ${token}`}:{}) }, body: cuerpo!==undefined ? JSON.stringify(cuerpo) : undefined });
-    }catch(e){ const er = new Error("No hay conexión con el servidor. Revisa tu internet."); er.red = true; throw er; }
+    }catch(e){ if(!opc.silencioso) Cargando.fin(); const er = new Error("No hay conexión con el servidor. Revisa tu internet."); er.red = true; throw er; }
     let j = {}; try{ j = await r.json(); }catch(e){}
+    if(!opc.silencioso) Cargando.fin();
     if(r.status===401 && token && !ruta.startsWith("/auth/login")){ token=null; try{ sessionStorage.removeItem(TOKEN_KEY); }catch(e){} if(typeof cerrarSesion==="function" && S.usuario) setTimeout(()=>cerrarSesion("expirada"),0); }
     if(!r.ok){ const er = new Error(j.error || "El servidor no respondió como se esperaba."); er.status = r.status; throw er; }
     return j;
@@ -163,7 +178,7 @@ const Store = (() => {
           vistos.add(x.id);
           const txt = JSON.stringify(x);
           if(base[c].get(x.id) === txt) continue;
-          const { data } = await api("PUT", `/docs/${c}/${encodeURIComponent(x.id)}`, { data:x });
+          const { data } = await api("PUT", `/docs/${c}/${encodeURIComponent(x.id)}`, { data:x }, { silencioso: c==="mensajes", texto: c==="citas" ? "Guardando la cita…" : c==="doctores" ? "Guardando el perfil…" : "Guardando…" });
           const i = lista.findIndex(o=>o.id===x.id); if(i>=0) lista[i] = data;
           const nuevo = JSON.stringify(data); base[c].set(x.id, nuevo); if(nuevo!==txt) cambioServidor = true;
         }
@@ -185,15 +200,15 @@ const Store = (() => {
     get d(){ return datos; },
     get token(){ return token; },
     ponerToken(t){ token = t; try{ t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY); }catch(e){} },
-    async cargar(){ const j = await api("GET","/estado"); datos = j; version = j.version; migrar(); foto(); return datos; },
+    async cargar(opc={}){ const j = await api("GET","/estado",undefined,opc); datos = j; version = j.version; migrar(); foto(); return datos; },
     /* manda al servidor lo que cambió; devuelve una promesa con true/false */
     guardar(){ cola = cola.then(sincronizar, sincronizar); return cola; },
     /* ¿hay cambios en el servidor? (otro usuario agendó, escribió, etc.) */
     async revisar(){
       if(!token || !datos || sincronizando) return false;
-      const { version:v } = await api("GET","/version");
+      const { version:v } = await api("GET","/version",undefined,{silencioso:true});
       if(v === version) return false;
-      await cola; await this.cargar(); return true;
+      await cola; await this.cargar({silencioso:true}); return true;
     },
     limpiar(){ datos = null; base = {}; version = ""; },
   };
@@ -203,7 +218,7 @@ function bitacora(accion, detalle=""){
   const x = Store.d; if(!x || !S.usuario) return;
   const e = { fecha:new Date().toISOString(), usuario:S.usuario.usuario, accion, detalle:limpiar(detalle,200) };
   if(Array.isArray(x.bitacora)) x.bitacora.unshift(e);
-  Store.api("POST","/bitacora",{accion, detalle:e.detalle}).catch(()=>{});
+  Store.api("POST","/bitacora",{accion, detalle:e.detalle},{silencioso:true}).catch(()=>{});
 }
 
 function nuevoFolio(){ const d=new Date(); return `EC-${String(d.getFullYear()).slice(2)}${pad(d.getMonth()+1)}-${aleatorio(5)}`; }
@@ -434,7 +449,7 @@ function pintarLogin(aviso=""){
         <button type="submit" class="btn btn-primary acc-entrar" id="lGo">Entrar</button>
         <p class="acc-nota">¿Olvidaste tu contraseña? Pide a tu recepción una contraseña temporal.</p>
       </form>`);
-  $("#lVer").addEventListener("click",()=>{ const p=$("#lPass"); const v=p.type==="password"; p.type=v?"text":"password"; $("#lVer").textContent=v?"Ocultar":"Mostrar"; });
+  ojitos($("#root"));
   $("#fLogin").addEventListener("submit", entrar);
   $("#lUser").focus();
 }
@@ -445,11 +460,11 @@ async function entrar(ev){
   if(!usuario || !pass) return fallo("Escribe tu usuario y contraseña.");
   btn.disabled=true; btn.textContent="Verificando…";
   try{
-    const r = await Store.api("POST","/auth/login",{ usuario, password:pass });
+    const r = await Store.api("POST","/auth/login",{ usuario, password:pass },{texto:"Verificando tus datos…"});
     Store.ponerToken(r.token); S.usuario = r.usuario; guardarSesion();
     if(r.usuario.debeCambiar){ pintarCambio(true); return enlazarCambio(); }
     btn.textContent="Cargando tu agenda…";
-    await Store.cargar(); arrancarApp();
+    await Store.cargar({texto:"Cargando tu agenda…"}); arrancarApp();
   }catch(e){ fallo(e.message); }
 }
 function pintarCambio(obligatorio){
@@ -464,7 +479,7 @@ function pintarCambio(obligatorio){
       <p class="note" style="margin:0">Mínimo 10 caracteres, con mayúsculas, minúsculas, un número y un símbolo.</p>
       <div style="display:flex;gap:8px;justify-content:flex-end">${obligatorio?`<button type="button" class="btn" id="pwSalir">Salir</button>`:""}<button type="submit" class="btn btn-primary">Guardar contraseña</button></div>
     </form>`;
-  if(obligatorio){ $("#root").innerHTML = marcoAcceso(html); $("#pwSalir").addEventListener("click",()=>cerrarSesion()); }
+  if(obligatorio){ $("#root").innerHTML = marcoAcceso(html); $("#pwSalir").addEventListener("click",()=>cerrarSesion()); ojitos($("#root")); }
   return html;
 }
 function enlazarCambio(){
@@ -476,7 +491,7 @@ function enlazarCambio(){
     const v=validarPassword(nueva); if(v) return show(v);
     if(nueva!==$("#pwRep").value) return show("Las contraseñas no coinciden.");
     try{
-      const r = await Store.api("POST","/auth/password",{ actual:$("#pwAct")?.value||"", nueva });
+      const r = await Store.api("POST","/auth/password",{ actual:$("#pwAct")?.value||"", nueva },{texto:"Guardando tu contraseña…"});
       Store.ponerToken(r.token); S.usuario = r.usuario; toast("Contraseña actualizada");
       if(!$("#app")){ await Store.cargar(); arrancarApp(); } else render();
     }catch(e){ show(e.message); }
@@ -1392,6 +1407,24 @@ function mejorarArchivos(raiz=document){
   });
 }
 
+/* ================= mostrar / ocultar contraseña =================
+   Todo campo de contraseña lleva un botón para ver lo que se escribe. */
+const OJO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const OJO_NO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.6 9.6 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.5 9.5 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+function ojitos(raiz=document){
+  raiz.querySelectorAll('input[type="password"]:not([data-ojo])').forEach(inp=>{
+    inp.dataset.ojo="1";
+    let caja = inp.closest(".pw");
+    if(!caja){ caja=document.createElement("span"); caja.className="pw"; inp.after(caja); caja.appendChild(inp); }
+    let btn = caja.querySelector("button");
+    if(!btn){ btn=document.createElement("button"); btn.type="button"; caja.appendChild(btn); }
+    btn.className="pw-ojo";
+    const pintar = () => { const v = inp.type==="text"; btn.innerHTML = (v?OJO_NO:OJO) + `<span>${v?"Ocultar":"Mostrar"}</span>`; btn.setAttribute("aria-label", v?"Ocultar contraseña":"Mostrar contraseña"); btn.setAttribute("aria-pressed", String(v)); };
+    btn.onclick = () => { inp.type = inp.type==="password" ? "text" : "password"; pintar(); inp.focus(); };
+    pintar();
+  });
+}
+
 /* ================= eventos por vista ================= */
 function enlazar(){
   const v = $("#view");
@@ -1435,6 +1468,7 @@ function enlazar(){
   enlazarMensajes();
   mejorarSelects($("#view"));
   mejorarArchivos($("#view"));
+  ojitos($("#view"));
 }
 function pintarHoraElegida(){
   const info=$("#agHoraInfo"); if(!info) return; const x=docById(S.ag.doctorId);
@@ -1640,7 +1674,7 @@ async function verificar(){
   const q = leerCodigo(t); if(q.folio) entrada.value = q.folio;
   out.innerHTML = `<p class="note" style="margin:0">Verificando…</p>`;
   try{
-    const r = await Store.api("POST","/verificar",{ codigo:t });
+    const r = await Store.api("POST","/verificar",{ codigo:t },{texto:"Verificando el ticket…"});
     const c = r.cita;
     const filas = c ? [["Folio",c.folio],["Paciente",c.paciente||"—"],["Médico",c.medico||"—"],["Fecha",fechaLarga(c.fecha)],["Hora",`${c.hora} h`],["Estado",c.estado==="confirmada"?"Confirmada":c.estado==="atendida"?"Atendida":"Cancelada"]] : null;
     out.innerHTML = tarjetaVerificacion(r.tipo==="ok"?"ok":"bad", r.titulo, r.texto, filas);
