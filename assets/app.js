@@ -35,6 +35,8 @@ const fechaHora = iso => new Date(iso).toLocaleString("es-MX",{dateStyle:"medium
 const dinero = n => Number(n||0).toLocaleString("es-MX",{style:"currency",currency:"MXN",maximumFractionDigits:0});
 const minutos = h => { const [a,b] = String(h).split(":").map(Number); return a*60+b; };
 const hhmm = m => `${pad(Math.floor(m/60))}:${pad(m%60)}`;
+/* Hora para mostrar: 12 h con AM / PM (internamente se guarda en 24 h) */
+const h12 = h => { if(!h) return ""; const [H,M] = String(h).split(":").map(Number); return `${((H+11)%12)+1}:${pad(M)} ${H>=12?"PM":"AM"}`; };
 const iniciales = n => String(n||"?").replace(/^(dr|dra|lic)\.?\s+/i,"").split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase();
 const limpiar = (v, max=120) => String(v ?? "").replace(/[\u0000-\u001F\u007F]/g," ").trim().slice(0,max);
 const limpiarTexto = (v, max=600) => String(v ?? "").replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g," ").trim().slice(0,max);
@@ -164,7 +166,7 @@ const Store = (() => {
     let j = {}; try{ j = await r.json(); }catch(e){}
     if(!opc.silencioso) Cargando.fin();
     if(r.status===401 && token && !ruta.startsWith("/auth/login")){ token=null; try{ sessionStorage.removeItem(TOKEN_KEY); }catch(e){} if(typeof cerrarSesion==="function" && S.usuario) setTimeout(()=>cerrarSesion("expirada"),0); }
-    if(!r.ok){ const er = new Error(j.error || "El servidor no respondió como se esperaba."); er.status = r.status; throw er; }
+    if(!r.ok){ const er = new Error(j.error || "El servidor no respondió como se esperaba."); er.status = r.status; er.datos = j; throw er; }
     return j;
   }
   async function sincronizar(){
@@ -240,7 +242,7 @@ function exigir(rol, doctorId){
 function guardarSesion(){ try{ sessionStorage.setItem(SESION_KEY, JSON.stringify({exp:Date.now()+INACTIVIDAD_MS})); }catch(e){} }
 function leerSesion(){ try{ const s = JSON.parse(sessionStorage.getItem(SESION_KEY)||"null"); if(!s || s.exp<Date.now()) return null; return s; }catch(e){ return null; } }
 function cerrarSesion(motivo){
-  if(S.usuario && motivo!=="expirada") bitacora("Cierre de sesión", motivo||"");
+  if(S.usuario && motivo!=="expirada"){ bitacora("Cierre de sesión", motivo||""); Notif.baja(); }
   S.usuario=null; Store.ponerToken(null); Store.limpiar(); try{ sessionStorage.removeItem(SESION_KEY); }catch(e){}
   document.querySelectorAll(".toast").forEach(t=>t.remove());
   cerrarCapa(); pintarLogin(motivo==="inactividad" ? "Tu sesión se cerró por inactividad." : motivo==="expirada" ? "Tu sesión terminó. Vuelve a entrar." : "");
@@ -293,10 +295,10 @@ function conflicto(doc, fecha, hora, excepto, dur){
   if(enAusencia(doc, fecha)) return `${doc.nombre} estará ausente ese día.`;
   const r = rangoDelDia(doc, fecha); if(!r) return `${doc.nombre} no atiende ese día.`;
   const m = minutos(hora), fin = m + (dur || r.dur);
-  if(m < r.inicio || fin > r.fin) return `Fuera de su horario (${hhmm(r.inicio)} a ${hhmm(r.fin)}; cada cita dura ${r.dur} min).`;
+  if(m < r.inicio || fin > r.fin) return `Fuera de su horario (${h12(hhmm(r.inicio))} a ${h12(hhmm(r.fin))}; cada cita dura ${r.dur} min).`;
   const ahora = new Date(); if(fecha===hoy() && m <= ahora.getHours()*60+ahora.getMinutes()) return "Esa hora ya pasó.";
   const choque = ocupacion(doc, fecha, d().citas, excepto).find(o=>traslapa(m, fin, o.ini, o.fin));
-  if(choque) return choque.tipo==="cita" ? `Choca con la cita de las ${choque.c.hora} (${hhmm(choque.ini)}–${hhmm(choque.fin)}).` : `El médico marcó ${hhmm(choque.ini)}–${hhmm(choque.fin)} como no disponible${choque.bq.motivo?` (${choque.bq.motivo})`:""}.`;
+  if(choque) return choque.tipo==="cita" ? `Choca con la cita de las ${h12(choque.c.hora)} (${h12(hhmm(choque.ini))} a ${h12(hhmm(choque.fin))}).` : `El médico marcó de ${h12(hhmm(choque.ini))} a ${h12(hhmm(choque.fin))} como no disponible${choque.bq.motivo?` (${choque.bq.motivo})`:""}.`;
   return "";
 }
 function horariosPara(doc, fecha, citas, excepto){
@@ -327,7 +329,7 @@ function estadoSuscripcion(x){
 const chipEstadoCita = e => e==="atendida" ? '<span class="chip neu">Atendida</span>' : e==="cancelada" ? '<span class="chip bad">Cancelada</span>' : '<span class="chip ok">Confirmada</span>';
 function textoHorario(x){
   const h=x.horario||{}; const orden=[1,2,3,4,5,6,0].filter(n=>(h.dias||[]).includes(n));
-  const rango = n => { const r=h.horas?.[n]||{inicio:h.inicio,fin:h.fin}; return `${r.inicio}–${r.fin}`; };
+  const rango = n => { const r=h.horas?.[n]||{inicio:h.inicio,fin:h.fin}; return `${h12(r.inicio)} a ${h12(r.fin)}`; };
   const grupos=[]; orden.forEach(n=>{ const g=grupos[grupos.length-1]; if(g && g.r===rango(n)) g.d.push(n); else grupos.push({r:rango(n), d:[n]}); });
   return `${grupos.map(g=>`${g.d.map(n=>DIAS[n]).join(", ")} ${g.r}`).join(" · ")} · citas de ${h.duracion||30} min`;
 }
@@ -340,6 +342,10 @@ const ICON = {
   citas:svg('<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 5v14" stroke-dasharray="2 2"/>'),
   medicos:svg('<path d="M6 3v6a4 4 0 0 0 8 0V3"/><path d="M10 13v3a5 5 0 0 0 10 0v-2"/><circle cx="20" cy="12" r="2"/>'),
   camara:svg('<path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/>'),
+  reloj:svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  sala:svg('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M7 9h3M7 12h6"/>'),
+  campana:svg('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>'),
+  estetoscopio:svg('<path d="M6 3v5a4 4 0 0 0 8 0V3"/><path d="M10 12v2a5 5 0 0 0 10 0v-1"/><circle cx="20" cy="11" r="2"/>'),
   mas_menu:svg('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>'),
   mensajes:svg('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z"/><path d="M8.5 11h7M8.5 14.5h4.5"/>'),
   enviar:svg('<path d="M21 3L10.5 13.5"/><path d="M21 3l-6.5 18-4-7.5L3 9.5z"/>'),
@@ -371,26 +377,45 @@ function qrPng(text, size=600){
 }
 
 /* La marca en PNG (trazo blanco) para dibujarla dentro del PDF */
-let MARCA_PNG = null;
-(()=>{ const svgTxt = ICON.marca.replace('stroke="currentColor"','stroke="#ffffff"').replace(/fill="currentColor"/g,'fill="#ffffff"').replace('width="18" height="18"','width="256" height="256" xmlns="http://www.w3.org/2000/svg"');
+let MARCA_PNG = null, MARCA_PNG_B = null;
+const cargarPng = (url, cb) => { const img=new Image(); img.onload=()=>{ const cv=document.createElement("canvas"); cv.width=img.width; cv.height=img.height; cv.getContext("2d").drawImage(img,0,0); cb(cv.toDataURL("image/png")); }; img.src=url; };
+cargarPng("assets/logo-a-negro.png", d=>{ MARCA_PNG = d; }); cargarPng("assets/logo-a-blanco.png", d=>{ MARCA_PNG_B = d; });
+(()=>{ return; const svgTxt = ICON.marca.replace('stroke="currentColor"','stroke="#ffffff"').replace(/fill="currentColor"/g,'fill="#ffffff"').replace('width="18" height="18"','width="256" height="256" xmlns="http://www.w3.org/2000/svg"');
   const img = new Image(); img.onload = () => { const cv=document.createElement("canvas"); cv.width=cv.height=256; cv.getContext("2d").drawImage(img,0,0,256,256); MARCA_PNG = cv.toDataURL("image/png"); };
   img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgTxt); })();
 
 /* ================= LOGIN ================= */
 /* Datos de la empresa para el pie de página y los documentos legales (ficticios, de prueba) */
 const EMPRESA = {
-  nombre:"Enlace Clínico", razon:"Enlace Clínico Servicios de Recepción, S.A.S. de C.V.",
-  correo:"contacto@enlaceclinico.mx", privacidad:"privacidad@enlaceclinico.mx",
+  nombre:"Assistant", razon:"Assistant Asistentes en Línea, S.A.S. de C.V.",
+  correo:"contacto@assistant.mx", privacidad:"privacidad@assistant.mx",
   telefono:"771 450 2210", horario:"Lunes a viernes, 8:00 a 20:00 h · Sábado, 9:00 a 14:00 h",
   domicilio:"Blvd. Felipe Ángeles 1010, Col. Venta Prieta, C.P. 42083, Pachuca de Soto, Hidalgo, México",
 };
+const LOGO_A = `<span class="logo-a" aria-hidden="true"><img class="solo-claro" src="assets/logo-a-negro.png" alt=""><img class="solo-oscuro" src="assets/logo-a-blanco.png" alt=""></span>`;
+const LOGO_COMPLETO = `<span class="logo-completo"><img class="solo-claro" src="assets/logo-negro.png" alt="Assistant · Asistentes en línea"><img class="solo-oscuro" src="assets/logo-blanco.png" alt="Assistant · Asistentes en línea"></span>`;
+const MARCA = (sub="") => `<div class="brand">${LOGO_A}<div><b class="marca-txt">ASSISTANT</b>${sub?`<small>${sub}</small>`:""}</div></div>`;
+/* Tema: claro (blanco y negro, botones verdes) u oscuro (negro y grises, azul) */
+const TEMA_KEY = "assistant:tema";
+function temaActual(){ return document.documentElement.dataset.theme || "light"; }
+function aplicarTema(t){ document.documentElement.dataset.theme = t; try{ localStorage.setItem(TEMA_KEY, t); }catch(e){} document.querySelectorAll(".tema-switch").forEach(b=>{ b.setAttribute("aria-checked", String(t==="dark")); b.title = t==="dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"; }); document.querySelector('meta[name="theme-color"]')?.setAttribute("content", t==="dark" ? "#0A0A0A" : "#FFFFFF"); }
+(()=>{ let t=null; try{ t=localStorage.getItem(TEMA_KEY); }catch(e){} if(!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; document.documentElement.dataset.theme = t; })();
+function switchTema(){
+  const osc = temaActual()==="dark";
+  return `<button type="button" class="tema-switch" role="switch" aria-checked="${osc}" aria-label="Modo oscuro" title="${osc?"Cambiar a modo claro":"Cambiar a modo oscuro"}">
+    <span class="ts-ico sol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span>
+    <span class="ts-ico luna" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span>
+    <span class="ts-perilla" aria-hidden="true"></span></button>`;
+}
+document.addEventListener("click", e=>{ if(e.target.closest(".tema-switch")) aplicarTema(temaActual()==="dark" ? "light" : "dark"); });
+
 function marcoAcceso(contenido){
   const anio = new Date().getFullYear();
   return `
   <div class="acceso">
     <header class="acc-top">
-      <div class="brand"><div class="brand-mark">${ICON.marca}</div><b>Enlace Clínico</b></div>
-      <span class="acc-ayuda">¿Problemas para entrar? <span class="num">${EMPRESA.telefono}</span></span>
+      ${MARCA("Asistentes en línea")}
+      <span class="acc-top-der">${switchTema()}<span class="acc-ayuda">¿Problemas para entrar? <span class="num">${EMPRESA.telefono}</span></span></span>
     </header>
     <main class="acc-main">
       <div class="acc-col">${contenido}</div>
@@ -405,7 +430,7 @@ function marcoAcceso(contenido){
     </main>
     <footer class="acc-pie">
       <div class="acc-pie-grid">
-        <section><b>Enlace Clínico</b><p>${esc(EMPRESA.razon)}</p><p>${esc(EMPRESA.domicilio)}</p></section>
+        <section><b>Assistant</b><p>${esc(EMPRESA.razon)}</p><p>${esc(EMPRESA.domicilio)}</p></section>
         <section><b>Contacto</b><p>Tel. <span class="num">${esc(EMPRESA.telefono)}</span></p><p>${esc(EMPRESA.correo)}</p><p>${esc(EMPRESA.horario)}</p></section>
         <section><b>Legal</b><p><button type="button" class="acc-link" data-legal="privacidad">Aviso de privacidad</button></p><p><button type="button" class="acc-link" data-legal="terminos">Términos y condiciones</button></p><p><button type="button" class="acc-link" data-legal="seguridad">Seguridad de la cuenta</button></p></section>
       </div>
@@ -425,7 +450,7 @@ const LEGAL = {
     <p>El servicio de recepción virtual se presta a médicos suscriptores mediante una mensualidad. La recepción agenda citas dentro del horario que el médico registra y emite un ticket por cada cita.</p>
     <h3>Mensualidad</h3><p>Se paga por adelantado. Si un pago vence, la suscripción puede pausarse y dejar de recibir citas nuevas hasta regularizarse. Las citas ya confirmadas se respetan.</p>
     <h3>Cuentas</h3><p>Cada cuenta es personal e intransferible. El titular es responsable de mantener su contraseña en secreto y de avisar de inmediato si sospecha un uso no autorizado.</p>
-    <h3>Responsabilidad médica</h3><p>Enlace Clínico solo gestiona la agenda. El diagnóstico, tratamiento y cobro de la consulta son responsabilidad exclusiva del médico.</p>
+    <h3>Responsabilidad médica</h3><p>Assistant solo gestiona la agenda. El diagnóstico, tratamiento y cobro de la consulta son responsabilidad exclusiva del médico.</p>
     <h3>Cancelación</h3><p>El médico puede cancelar su suscripción en cualquier momento avisando a la recepción; el servicio termina al concluir el periodo pagado.</p>`],
   seguridad:["Seguridad de la cuenta", () => `
     <p>Las contraseñas se guardan cifradas con PBKDF2-SHA256 y nunca en texto legible. Nadie de la recepción puede ver tu contraseña; solo puede generarte una temporal que deberás cambiar al entrar.</p>
@@ -441,6 +466,7 @@ document.addEventListener("click", e=>{ const b=e.target.closest("[data-legal]")
 function pintarLogin(aviso=""){
   $("#root").innerHTML = marcoAcceso(`
       <form class="acc-form" id="fLogin" novalidate autocomplete="on">
+        <div class="acc-logo">${LOGO_COMPLETO}</div>
         <div class="acc-titulo"><h1>Iniciar sesión</h1><p>Entra con el usuario que te asignó tu recepción.</p></div>
         ${aviso?`<div class="err" role="alert">${esc(aviso)}</div>`:""}
         <div class="err" id="lErr" role="alert" hidden></div>
@@ -465,7 +491,10 @@ async function entrar(ev){
     if(r.usuario.debeCambiar){ pintarCambio(true); return enlazarCambio(); }
     btn.textContent="Cargando tu agenda…";
     await Store.cargar({texto:"Cargando tu agenda…"}); arrancarApp();
-  }catch(e){ fallo(e.message); }
+  }catch(e){
+    if(e.datos?.codigo==="pago"){ fallo(""); err.hidden=true; return ventanaPago(e.datos); }
+    fallo(e.message);
+  }
 }
 function pintarCambio(obligatorio){
   const html = `
@@ -499,24 +528,25 @@ function enlazarCambio(){
 }
 
 /* ================= marco de la app ================= */
-const NAV_ADMIN = [["panel","Panel"],["agendar","Agendar"],["citas","Citas"],["mensajes","Mensajes"],["medicos","Médicos"],["planes","Planes"],["verificar","Verificar"],["bitacora","Bitácora"]];
+const NAV_ADMIN = [["panel","Panel"],["agendar","Agendar"],["citas","Citas"],["mensajes","Mensajes"],["medicos","Médicos"],["sala","Sala de espera"],["planes","Planes"],["verificar","Verificar"],["bitacora","Bitácora"]];
 const NAV_DOC = [["agenda","Mis citas"],["mensajes","Mensajes"],["perfil","Mi perfil"],["planes","Mi plan"],["verificar","Verificar"],["cuenta","Mi cuenta"]];
 function arrancarApp(){
   S.vista = esAdmin() ? "panel" : "agenda"; vistosMsg = sinLeer();
+  if(Notif.estado()==="activo") Notif.suscribir(false).catch(()=>{});
   $("#root").innerHTML = `
   <div class="app" id="app">
     <aside class="side" aria-label="Navegación">
-      <div class="brand"><div class="brand-mark">${ICON.marca}</div><div><b>Enlace Clínico</b><small>${esAdmin()?"Administración":"Portal del médico"}</small></div></div>
+      ${MARCA(esAdmin()?"Administración":"Portal del médico")}
       <nav class="nav" id="nav"></nav>
-      <div class="side-foot"><div class="userbox" id="userbox"></div><button type="button" class="btn btn-sm" data-salir>${ICON.salir}Cerrar sesión</button></div>
+      <div class="side-foot"><div id="notifBox"></div><div class="tema-fila"><span>Modo oscuro</span>${switchTema()}</div><div class="userbox" id="userbox"></div><button type="button" class="btn btn-sm" data-salir>${ICON.salir}Cerrar sesión</button></div>
     </aside>
     <div style="min-width:0">
-      <header class="topbar"><div class="brand"><div class="brand-mark">${ICON.marca}</div><div><b>Enlace Clínico</b></div></div><button type="button" class="btn btn-sm" data-salir aria-label="Cerrar sesión">${ICON.salir}Salir</button></header>
+      <header class="topbar">${MARCA()}<span class="topbar-der">${switchTema()}<button type="button" class="btn btn-sm" data-salir aria-label="Cerrar sesión">${ICON.salir}Salir</button></span></header>
       <main class="main"><div class="wrap" id="view"></div></main>
     </div>
     <nav class="tabbar" id="tabbar" aria-label="Navegación"></nav>
   </div>`;
-  document.querySelectorAll("[data-salir]").forEach(b=>b.addEventListener("click",()=>cerrarSesion()));
+  document.querySelectorAll("[data-salir]").forEach(b=>b.addEventListener("click",pedirSalida));
   render();
 }
 document.addEventListener("click", e=>{ const b = e.target.closest("[data-v]"); if(!b || !S.usuario) return; S.vista=b.dataset.v; render(); window.scrollTo({top:0}); });
@@ -534,10 +564,11 @@ function pintarNav(){
     + `<button type="button" id="tabMas" ${enResto?'aria-current="page"':""} aria-haspopup="dialog">${ICON.mas_menu}<span>Más</span></button>`;
   $("#tabMas").onclick = () => {
     capa(`<div class="modal hoja-mas" role="dialog" aria-modal="true" aria-labelledby="masT"><div class="modal-h"><h2 id="masT">Más opciones</h2><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div>
-      <div class="modal-b"><div class="mas-grid">${resto.map(([k,t])=>`<button type="button" class="mas-item" data-v="${k}" ${S.vista===k?'aria-current="page"':""}>${ICON[k]}<span>${t}</span></button>`).join("")}<button type="button" class="mas-item salir" data-salir>${ICON.salir}<span>Cerrar sesión</span></button></div></div></div>`);
+      <div class="modal-b"><div class="mas-grid">${resto.map(([k,t])=>`<button type="button" class="mas-item" data-v="${k}" ${S.vista===k?'aria-current="page"':""}>${ICON[k]}<span>${t}</span></button>`).join("")}<button type="button" class="mas-item" data-notif>${ICON.campana}<span>Notificaciones</span></button><button type="button" class="mas-item salir" data-salir>${ICON.salir}<span>Cerrar sesión</span></button></div></div></div>`);
     document.querySelectorAll("#ov [data-v]").forEach(b=>b.addEventListener("click",()=>cerrarCapa()));
-    document.querySelector("#ov [data-salir]").addEventListener("click",()=>cerrarSesion());
+    document.querySelector("#ov [data-salir]").addEventListener("click",()=>{ cerrarCapa(); pedirSalida(); });
   };
+  const nb = $("#notifBox"); if(nb) nb.innerHTML = botonNotif();
   const doc = miDoctor();
   $("#userbox").innerHTML = `${doc?avatarDe(doc):`<span class="avatar" style="--c:#10242A">${esc(iniciales(S.usuario.nombre||S.usuario.usuario))}</span>`}<div><b>${esc(doc?.nombre||S.usuario.nombre||"Recepción")}</b><small>@${esc(S.usuario.usuario)}</small></div>`;
 }
@@ -550,7 +581,7 @@ function render(){
   pintarNav();
   const v = $("#view");
   if(esAdmin()){
-    v.innerHTML = S.vista==="perfil" && docById(S.perfilDe) ? vistaPerfil(docById(S.perfilDe), false) : ({panel:vistaPanel,agendar:vistaAgendar,citas:vistaCitas,mensajes:vistaMensajes,medicos:vistaMedicos,planes:vistaPlanesAdmin,verificar:vistaVerificar,bitacora:vistaBitacora}[S.vista]||vistaPanel)();
+    v.innerHTML = S.vista==="perfil" && docById(S.perfilDe) ? vistaPerfil(docById(S.perfilDe), false) : ({panel:vistaPanel,agendar:vistaAgendar,citas:vistaCitas,mensajes:vistaMensajes,medicos:vistaMedicos,sala:vistaSala,planes:vistaPlanesAdmin,verificar:vistaVerificar,bitacora:vistaBitacora}[S.vista]||vistaPanel)();
   } else {
     const me = miDoctor();
     if(!me){ v.innerHTML = `<div class="panel empty"><b>Tu cuenta no está ligada a un consultorio</b>Pide a tu recepción que revise tu perfil.</div>`; return; }
@@ -558,14 +589,14 @@ function render(){
   }
   enlazar();
   const nuevo = $("#chatTexto"); if(nuevo){ nuevo.value = S.chatBorrador[S.chatCon||"_"]||""; autoAltura(nuevo); if(conFoco) nuevo.focus(); }
-  document.title = sinLeer() ? `(${sinLeer()}) Enlace Clínico` : "Enlace Clínico";
+  document.title = sinLeer() ? `(${sinLeer()}) Enlace Clínico` : "Assistant";
 }
 
 /* ================= vistas ================= */
 function filaCita(c, conDoctor=true){
   const x = docById(c.doctorId);
   return `<button type="button" class="row" data-ticket="${esc(c.id)}">
-    <span class="when"><b class="num">${esc(c.hora)}</b><small>${esc(fechaCorta(c.fecha))}</small></span>
+    <span class="when"><b class="num">${esc(h12(c.hora))}</b><small>${esc(fechaCorta(c.fecha))}</small></span>
     <span class="who"><b>${esc(c.paciente?.nombre)}</b><small>${conDoctor && x ? `<span class="dot" style="background:${esc(x.color)}"></span>${esc(x.nombre)} · ` : ""}${esc(c.paciente?.motivo || "Consulta")}</small></span>
     ${chipEstadoCita(c.estado)}
   </button>`;
@@ -579,6 +610,7 @@ function vistaPanel(){
   const prox = d().citas.filter(c=>c.fecha>=t && c.fecha<=semana && c.estado==="confirmada").sort((a,b)=>(a.fecha+a.hora).localeCompare(b.fecha+b.hora));
   const pagos = d().doctores.filter(x=>x.estado!=="pausada" && x.proximoPago && x.proximoPago<=addDays(t,7)).sort((a,b)=>a.proximoPago.localeCompare(b.proximoPago));
   const avisos = d().citas.filter(c=>c.avisoPendiente).sort((a,b)=>(a.fecha+a.hora).localeCompare(b.fecha+b.hora));
+  const recetas = d().citas.filter(c=>c.recetaPendiente).sort((a,b)=>(b.consulta?.fecha||"").localeCompare(a.consulta?.fecha||""));
   return `
   <div class="head"><div><div class="eyebrow">${esc(fechaLarga(t))}</div><h1>Recepción del día</h1><p>Tus médicos suscritos, sus citas y los pagos por cobrar.</p></div>
     <button type="button" class="btn btn-primary" data-v="agendar">${ICON.mas}Agendar cita</button></div>
@@ -588,8 +620,10 @@ function vistaPanel(){
     <div class="panel kpi"><span>Citas de hoy</span><b class="num">${deHoy.length}</b><small>${deHoy.filter(c=>c.estado==="atendida").length} atendidas</small></div>
     <div class="panel kpi"><span>Próximos 7 días</span><b class="num">${prox.length}</b><small>citas confirmadas</small></div>
   </div>
+  ${recetas.length?`<section class="panel recetas"><div class="panel-h"><h2>Recetas por enviar al paciente</h2><span class="chip ok">${recetas.length} consulta${recetas.length>1?"s":""} terminada${recetas.length>1?"s":""}</span></div>
+    <div class="rows">${recetas.map(c=>{ const x=docById(c.doctorId); return `<div class="row" style="cursor:default;grid-template-columns:auto minmax(0,1fr) auto">${x?avatarDe(x):""}<span class="who"><b>${esc(c.paciente?.nombre)} · <span class="num">${esc(c.paciente?.telefono||"sin teléfono")}</span></b><small>${esc(x?.nombre||"")} · ${esc(fechaCorta(c.fecha))} ${esc(h12(c.hora))}</small></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button type="button" class="btn btn-sm" data-ver-consulta="${esc(c.id)}">Ver</button><button type="button" class="btn btn-sm" data-receta-pdf="${esc(c.id)}">${ICON.pdf}PDF</button><button type="button" class="btn btn-sm btn-primary" data-receta-ok="${esc(c.id)}">Enviada</button></span></div>`; }).join("")}</div></section>`:""}
   ${avisos.length?`<section class="panel avisos"><div class="panel-h"><h2>Pacientes por avisar</h2><span class="chip bad">${avisos.length} cita${avisos.length>1?"s":""} cancelada${avisos.length>1?"s":""} por el médico</span></div>
-    <div class="rows">${avisos.map(c=>{ const x=docById(c.doctorId); return `<div class="row" style="cursor:default;grid-template-columns:76px minmax(0,1fr) auto"><span class="when"><b class="num">${esc(c.hora)}</b><small>${esc(fechaCorta(c.fecha))}</small></span><span class="who"><b>${esc(c.paciente?.nombre)} · <span class="num">${esc(c.paciente?.telefono||"sin teléfono")}</span></b><small>${esc(x?.nombre||"")} · ${esc(c.motivoCancelacion||"Cancelada por el médico")}</small></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button type="button" class="btn btn-sm" data-aviso-ok="${esc(c.id)}">Ya le avisé</button><button type="button" class="btn btn-sm btn-primary" data-reubicar="${esc(c.id)}">Reagendar</button></span></div>`; }).join("")}</div></section>`:""}
+    <div class="rows">${avisos.map(c=>{ const x=docById(c.doctorId); return `<div class="row" style="cursor:default;grid-template-columns:76px minmax(0,1fr) auto"><span class="when"><b class="num">${esc(h12(c.hora))}</b><small>${esc(fechaCorta(c.fecha))}</small></span><span class="who"><b>${esc(c.paciente?.nombre)} · <span class="num">${esc(c.paciente?.telefono||"sin teléfono")}</span></b><small>${esc(x?.nombre||"")} · ${esc(c.motivoCancelacion||"Cancelada por el médico")}</small></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button type="button" class="btn btn-sm" data-aviso-ok="${esc(c.id)}">Ya le avisé</button><button type="button" class="btn btn-sm btn-primary" data-reubicar="${esc(c.id)}">Reagendar</button></span></div>`; }).join("")}</div></section>`:""}
   <div class="two">
     <section class="panel"><div class="panel-h"><h2>Próximas citas</h2><button type="button" class="btn btn-sm" data-v="citas">Ver todas</button></div>
       <div class="rows">${prox.length ? prox.slice(0,8).map(c=>filaCita(c)).join("") : `<div class="empty"><b>Sin citas en los próximos 7 días</b>Cuando un paciente te contacte, agenda su cita y aparecerá aquí.</div>`}</div></section>
@@ -620,12 +654,12 @@ function vistaAgendar(){
         <div class="leyenda"><span class="ley libre">Disponible</span><span class="ley sel">Seleccionado</span><span class="ley lleno">Lleno</span><span class="ley aus">Ausente</span><span class="ley no">No atiende</span></div>
         ${S.ag.vista==="mes" ? calendarioMes(x) : `<div class="days">${dias.slice(0,14).map(f=>celdaDia(x,f,"dia")).join("")}</div>`}</div>
       <div class="step"><h3><i>3</i>Hora · <span style="font-weight:500">${esc(fechaLarga(S.ag.fecha))}</span>${slots.length?`<span class="leyenda"><span class="ley libre">${slots.filter(o=>o.libre).length} libres</span><span class="ley lleno">${slots.filter(o=>o.estado==="ocupado").length} ocupados</span></span>`:""}</h3>
-        ${ausHoy ? `<p class="note aviso-aus">${esc(x.nombre)} estará ausente${ausHoy.motivo?` (${esc(ausHoy.motivo)})`:""} del ${esc(fechaCorta(ausHoy.desde))} al ${esc(fechaCorta(ausHoy.hasta))}.</p>` : slots.length ? `<div class="slots">${slots.map(o=>`<button type="button" class="slot ${o.estado}" data-aghora="${o.hora}" aria-pressed="${o.hora===S.ag.hora}" ${o.libre?"":"disabled"}><b class="num">${o.hora}</b><small>${o.estado==="libre"?"Disponible":o.estado==="ocupado"?"Ocupado":o.estado==="bloqueado"?"No disponible":"Ya pasó"}</small></button>`).join("")}</div>
-          ${bloqueosDia.length?`<p class="note bloq-nota">El médico no está disponible ${bloqueosDia.map(bq=>`de ${esc(bq.desde)} a ${esc(bq.hasta)}${bq.motivo?` (${esc(bq.motivo)})`:""}`).join(", ")}.</p>`:""}
+        ${ausHoy ? `<p class="note aviso-aus">${esc(x.nombre)} estará ausente${ausHoy.motivo?` (${esc(ausHoy.motivo)})`:""} del ${esc(fechaCorta(ausHoy.desde))} al ${esc(fechaCorta(ausHoy.hasta))}.</p>` : slots.length ? `<div class="slots">${slots.map(o=>`<button type="button" class="slot ${o.estado}" data-aghora="${o.hora}" aria-pressed="${o.hora===S.ag.hora}" ${o.libre?"":"disabled"}><b class="num">${h12(o.hora)}</b><small>${o.estado==="libre"?"Disponible":o.estado==="ocupado"?"Ocupado":o.estado==="bloqueado"?"No disponible":"Ya pasó"}</small></button>`).join("")}</div>
+          ${bloqueosDia.length?`<p class="note bloq-nota">El médico no está disponible ${bloqueosDia.map(bq=>`de ${esc(h12(bq.desde))} a ${esc(h12(bq.hasta))}${bq.motivo?` (${esc(bq.motivo)})`:""}`).join(", ")}.</p>`:""}
           <div class="hora-exacta">
             <label class="field" for="agHoraExacta"><span>¿Otra hora? Escríbela</span><input class="input" id="agHoraExacta" type="time" step="300" value="${horaExacta?esc(S.ag.hora):""}"></label>
             <button type="button" class="btn" id="agUsarHora">Usar esta hora</button>
-            <span class="hora-elegida" id="agHoraInfo" role="status">${S.ag.hora?`Hora elegida: <b class="num">${esc(S.ag.hora)}</b> · termina ${esc(hhmm(minutos(S.ag.hora)+Number(x.horario?.duracion||30)))}`:""}</span>
+            <span class="hora-elegida" id="agHoraInfo" role="status">${S.ag.hora?`Hora elegida: <b class="num">${esc(h12(S.ag.hora))}</b> · termina ${esc(h12(hhmm(minutos(S.ag.hora)+Number(x.horario?.duracion||30))))}`:""}</span>
           </div>` : `<p class="note">${esc(x.nombre)} no atiende este día.</p>`}</div>
       <div class="step"><h3><i>4</i>Paciente</h3>
         <div class="grid2">
@@ -696,7 +730,7 @@ function vistaCitas(){
     <select class="input" id="fdoc" style="flex:0 1 220px" aria-label="Médico"><option value="">Todos los médicos</option>${d().doctores.map(x=>`<option value="${esc(x.id)}" data-color="${esc(x.color)}" ${f.doctor===x.id?"selected":""}>${esc(x.nombre)}</option>`).join("")}</select>
     <div class="seg" role="group" aria-label="Estado">${[["proximas","Próximas"],["pasadas","Pasadas"],["canceladas","Canceladas"],["todas","Todas"]].map(([k,tt])=>`<button type="button" data-fest="${k}" aria-pressed="${f.estado===k}">${tt}</button>`).join("")}</div>
   </div>
-  <section class="panel"><div class="rows">${l.length ? l.map(c=>filaCita(c)).join("") : `<div class="empty"><b>No hay citas con estos filtros</b>Cambia el estado o la búsqueda.</div>`}</div></section>`;
+  ${l.length ? `<div class="cita-cards">${l.map(tarjetaCita).join("")}</div>` : `<div class="panel empty"><b>No hay citas con estos filtros</b>Cambia el estado o la búsqueda.</div>`}`;
 }
 
 function vistaMedicos(){
@@ -708,7 +742,7 @@ function vistaMedicos(){
     <article class="panel doc" style="--c:${esc(x.color)}">
       <div class="doc-top">${avatarDe(x)}<div style="min-width:0"><b>${esc(x.nombre)}</b><small>${esc(x.especialidad)}${x.cedula?` · Céd. ${esc(x.cedula)}`:""}</small></div></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="chip ${e.cls}">${esc(e.txt)}</span>${u?`<span class="chip ${u.activo?"ok":"bad"}">@${esc(u.usuario)}${u.activo?"":" · desactivado"}</span>`:'<span class="chip neu">Sin cuenta</span>'}${x.ejemplo?'<span class="chip ex">Prueba</span>':""}</div>
-      <div class="plan"><span>Plan ${esc(planDe(x).nombre)}</span><b class="num">${planDe(x).prueba?"Gratis":dinero(x.cuota)}${planDe(x).prueba?"":'<small style="font-size:12px;color:var(--ink-3)">/mes</small>'}</b></div>
+      <div class="plan">${insigniaPlan(planDe(x).id)}<span>Plan ${esc(planDe(x).nombre)}</span><b class="num">${planDe(x).prueba?"Gratis":dinero(x.cuota)}${planDe(x).prueba?"":'<small style="font-size:12px;color:var(--ink-3)">/mes</small>'}</b></div>
       <dl class="kv"><dt>Teléfono</dt><dd class="num">${esc(x.telefono||"—")}</dd><dt>Consultorio</dt><dd>${esc(x.consultorio)}${x.direccion?`, ${esc(x.direccion)}`:""}</dd><dt>Horario</dt><dd>${esc(textoHorario(x))}</dd><dt>Próx. pago</dt><dd>${x.proximoPago?esc(fechaCorta(x.proximoPago)):"—"}</dd><dt>Citas próximas</dt><dd class="num">${n}</dd></dl>
       <div class="doc-foot"><button type="button" class="btn btn-sm btn-primary" data-ver-perfil="${esc(x.id)}">Ver perfil</button><button type="button" class="btn btn-sm" data-edit-doc="${esc(x.id)}">Editar</button><button type="button" class="btn btn-sm" data-pago="${esc(x.id)}">Registrar pago</button><button type="button" class="btn btn-sm" data-pausa="${esc(x.id)}">${x.estado==="pausada"?"Reactivar":"Pausar"}</button></div>
     </article>`; }).join("")}</div>` : `<div class="panel empty"><b>Aún no tienes suscriptores</b>Registra a tu primer médico para empezar a agendar sus citas.<div style="margin-top:12px"><button type="button" class="btn btn-primary" data-nuevo-doc>${ICON.mas}Nuevo suscriptor</button></div></div>`}`;
@@ -799,7 +833,7 @@ function tarjetaPlan(p, opciones={}){
   const { actual=false, accion="" } = opciones;
   return `<article class="plancard ${p.destacado?"destacado":""} ${actual?"actual":""} ${p.activo?"":"inactivo"}">
     <header>
-      <div class="plancard-tit"><h3>${esc(p.nombre)}</h3>${p.destacado?'<span class="sello">Recomendado</span>':""}${actual?'<span class="sello actual">Tu plan actual</span>':""}${p.activo?"":'<span class="sello off">Oculto</span>'}</div>
+      <div class="plancard-tit">${insigniaPlan(p.id)}<h3>${esc(p.nombre)}</h3>${p.destacado?'<span class="sello">Recomendado</span>':""}${actual?'<span class="sello actual">Tu plan actual</span>':""}${p.activo?"":'<span class="sello off">Oculto</span>'}</div>
       <p>${esc(p.lema||"")}</p>
       <div class="precio"><b class="num">${p.precio?dinero(p.precio):"Gratis"}</b><span>${p.prueba?`por ${p.dias||7} días`:"al mes"}</span></div>
     </header>
@@ -822,6 +856,7 @@ function vistaPlanesAdmin(){
     <div class="panel kpi"><span>Plan más contratado</span><b style="font-size:22px">${esc((planes().filter(p=>!p.prueba).sort((a,b)=>porPlan(b.id)-porPlan(a.id))[0]||{}).nombre||"—")}</b><small>por número de médicos</small></div>
     <div class="panel kpi"><span>Solicitudes</span><b class="num">${pend.length}</b><small>cambios por aprobar</small></div>
   </div>
+  ${seccionBanco(true)}
   <div class="planes">${planes().map(p=>tarjetaPlan(p,{accion:`<footer class="plancard-pie"><span class="note">${porPlan(p.id)} médico${porPlan(p.id)===1?"":"s"}</span><button type="button" class="btn btn-sm" data-plan-edit="${esc(p.id)}">Editar</button></footer>`})).join("")}</div>`;
 }
 function vistaPlanesMedico(me){
@@ -833,7 +868,7 @@ function vistaPlanesMedico(me){
   <section class="panel panel-b miplan">
     <div class="miplan-izq">
       <span class="chip ${estadoSuscripcion(me).cls}">${esc(estadoSuscripcion(me).txt)}</span>
-      <h2>${esc(actual.nombre)}</h2>
+      <div class="miplan-tit">${insigniaPlan(actual.id,"grande")}<h2>${esc(actual.nombre)}</h2></div>
       <p>${esc(actual.lema||"")}</p>
     </div>
     <div class="miplan-der">
@@ -843,6 +878,7 @@ function vistaPlanesMedico(me){
   </section>
   ${pend?`<div class="banner">Solicitaste cambiar a <b>${esc(planPorId(pend.a).nombre)}</b> el ${esc(fechaHora(pend.fecha))}; tu recepción la revisará y te avisará. <button type="button" class="btn btn-sm" data-sol-cancelar="${esc(pend.id)}" style="margin-left:8px">Cancelar solicitud</button></div>`
         :ultima && ultima.estado==="rechazada" && (Date.now()-new Date(ultima.resuelta))<7*864e5?`<div class="banner">Tu solicitud de cambio a <b>${esc(planPorId(ultima.a).nombre)}</b> no se aprobó. Comunícate con tu recepción para más detalles.</div>`:""}
+  ${seccionBanco(false, me)}
   <div class="planes">${planes().filter(p=>p.activo || p.id===actual.id).filter(p=>!p.prueba || p.id===actual.id).map(p=>{
     const esActual = p.id===actual.id;
     const accion = esActual ? `<footer class="plancard-pie"><span class="note">Es tu plan actual</span></footer>`
@@ -919,7 +955,7 @@ function vistaBitacora(){
   const l = d().bitacora.slice(0,200);
   return `
   <div class="head"><div><div class="eyebrow">Seguridad</div><h1>Bitácora</h1><p>Accesos, intentos fallidos y cambios hechos en la recepción (últimos 200).</p></div>
-    <button type="button" class="btn btn-danger" id="bReset">Restablecer datos de prueba</button></div>
+</div>
   <section class="panel log"><div class="rows">${l.length ? l.map(r=>`<div class="row"><span class="note num">${esc(fechaHora(r.fecha))}</span><span class="who"><b>${esc(r.accion)}</b><small>@${esc(r.usuario)}${r.detalle?" · "+esc(r.detalle):""}</small></span>${/fallido|bloque/i.test(r.accion+r.detalle)?'<span class="chip bad">Alerta</span>':'<span></span>'}</div>`).join("") : `<div class="empty"><b>Sin movimientos</b></div>`}</div></section>`;
 }
 
@@ -930,16 +966,233 @@ function vistaMedico(me){
   const grupos = {}; prox.forEach(c=>(grupos[c.fecha] ||= []).push(c));
   const deHoy = mias.filter(c=>c.fecha===t);
   return `
-  <div class="head"><div><div class="eyebrow">${esc(fechaLarga(t))}</div><h1>Hola, ${esc(me.nombre)}</h1><p>Estas son las citas que tu recepción agendó para ti.</p></div></div>
+  <div class="head"><div><div class="eyebrow">${esc(fechaLarga(t))}</div><h1>Hola, ${esc(me.nombre)}</h1><p>Estas son las citas que tu recepción agendó para ti.</p></div><button type="button" class="btn" data-sala="${esc(me.id)}">${ICON.sala}Sala de espera</button></div>
   <div class="kpis">
     <div class="panel kpi"><span>Hoy</span><b class="num">${deHoy.length}</b><small>${deHoy.filter(c=>c.estado==="atendida").length} atendidas</small></div>
     <div class="panel kpi"><span>Esta semana</span><b class="num">${prox.filter(c=>c.fecha<=addDays(t,7)).length}</b><small>confirmadas</small></div>
-    <div class="panel kpi"><span>Próxima cita</span><b class="num" style="font-size:22px">${prox[0]?esc(prox[0].hora):"—"}</b><small>${prox[0]?esc(fechaCorta(prox[0].fecha))+" · "+esc(prox[0].paciente?.nombre):"sin pendientes"}</small></div>
+    <div class="panel kpi"><span>Próxima cita</span><b class="num" style="font-size:22px">${prox[0]?esc(h12(prox[0].hora)):"—"}</b><small>${prox[0]?esc(fechaCorta(prox[0].fecha))+" · "+esc(prox[0].paciente?.nombre):"sin pendientes"}</small></div>
     <div class="panel kpi"><span>Consultorio</span><b style="font-size:16px;line-height:1.3">${esc(me.consultorio)}</b><small>${esc(me.direccion||"")}</small></div>
   </div>
   ${prox.length ? Object.entries(grupos).map(([f,l])=>`<section class="daygroup"><h3>${esc(fechaLarga(f))}</h3><div class="tix">${l.map(c=>`
-    <button type="button" class="tick" data-ticket="${esc(c.id)}"><span class="tick-m"><b>${esc(c.paciente?.nombre)}</b><small>${esc(c.paciente?.motivo||"Consulta")}</small><small>${c.notas?"Nota: "+esc(c.notas):"Sin observaciones"}</small><span class="mono note">${esc(c.folio)}</span></span><span class="tick-s"><small>${esc(fechaCorta(f))}</small><b class="num">${esc(c.hora)}</b></span></button>`).join("")}</div></section>`).join("") : `<div class="panel empty"><b>No tienes citas pendientes</b>Cuando tu recepción agende una cita, su ticket aparecerá aquí.</div>`}`;
+    <button type="button" class="tick" data-ticket="${esc(c.id)}"><span class="tick-m"><b>${esc(c.paciente?.nombre)}</b><small>${esc(c.paciente?.motivo||"Consulta")}</small><small>${c.notas?"Nota: "+esc(c.notas):"Sin observaciones"}</small><span class="mono note">${esc(c.folio)}</span></span><span class="tick-s"><small>${esc(fechaCorta(f))}</small><b class="num">${esc(h12(c.hora))}</b></span></button>`).join("")}</div></section>`).join("") : `<div class="panel empty"><b>No tienes citas pendientes</b>Cuando tu recepción agende una cita, su ticket aparecerá aquí.</div>`}
+  ${historialConsultas(me)}`;
 }
+
+/* ================= insignias ================= */
+const PLAN_COLORES = {
+  prueba:{ rgb:[150,150,150], txt:[255,255,255], css:"linear-gradient(135deg,#B8B8B8,#7D7D7D)", nombre:"Prueba" },
+  esencial:{ rgb:[176,112,62], txt:[255,255,255], css:"linear-gradient(135deg,#D9A273,#9A5B2E)", nombre:"Bronce" },
+  profesional:{ rgb:[158,166,176], txt:[20,20,20], css:"linear-gradient(135deg,#F1F3F6,#9AA3AE)", nombre:"Plata" },
+  clinica:{ rgb:[212,170,60], txt:[30,20,0], css:"linear-gradient(135deg,#F7DB7A,#B8862B)", nombre:"Oro" },
+};
+function insigniaPlan(id, tam=""){
+  const p = planPorId(id); const c = PLAN_COLORES[p?.id] || { css:"linear-gradient(135deg,#6B7280,#374151)", nombre:"Miembro" };
+  return `<span class="insignia-plan ${tam}" style="--fondo:${c.css}" title="Plan ${esc(p?.nombre||"")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 15.4 6.8 18.1l1-5.8L3.5 8.2l5.9-.9z" fill="currentColor"/></svg><span>${esc(p?.nombre||"")}</span></span>`;
+}
+const TONOS_CERT = ["#0B7A63","#2563EB","#9333EA","#C2410C","#0E7490","#B45309"];
+const MEDALLA = `<span class="medalla" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M16 4h16l-3 14H19z" fill="currentColor" opacity=".55"/><circle cx="24" cy="29" r="13" fill="currentColor"/><circle cx="24" cy="29" r="9.5" fill="none" stroke="#fff" stroke-width="1.6" opacity=".7"/><path d="M19 29.5l3.4 3.4 6.6-7" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+
+/* ================= citas en tarjetas (admin) ================= */
+function tarjetaCita(c){
+  const x = docById(c.doctorId);
+  return `<button type="button" class="cita-card estado-${esc(c.estado)}" data-ticket="${esc(c.id)}">
+    <span class="cc-top"><span class="cc-hora"><b class="num">${esc(h12(c.hora))}</b><small>${esc(fechaCorta(c.fecha))}</small></span>${chipEstadoCita(c.estado)}</span>
+    <b class="cc-paciente">${esc(c.paciente?.nombre)}</b>
+    <small class="cc-motivo">${esc(c.paciente?.motivo||"Consulta")}</small>
+    <span class="cc-doc">${x?avatarDe(x):""}<span><b>${esc(x?.nombre||"—")}</b><small>${esc(x?.especialidad||"")}</small></span></span>
+    <span class="cc-pie"><span class="mono">${esc(c.folio)}</span>${c.usado?'<span class="chip neu">Ticket usado</span>':""}${c.recetaPendiente?'<span class="chip ok">Receta por enviar</span>':""}</span>
+  </button>`;
+}
+
+/* ================= consulta (médico) ================= */
+async function abrirConsulta(id){
+  const c = d().citas.find(o=>o.id===id); if(!c) return;
+  try{
+    if(!c.enConsulta){ const r = await Store.api("POST",`/citas/${encodeURIComponent(id)}/consulta`,{accion:"iniciar"},{texto:"Pasando a consulta…"}); Object.assign(c, r.data); await Store.cargar({silencioso:true}); }
+  }catch(e){ return toast(e.message); }
+  const x = docById(c.doctorId);
+  capa(`<form class="modal consulta" id="fConsulta" role="dialog" aria-modal="true" aria-labelledby="csT" novalidate>
+    <div class="modal-h"><div><h2 id="csT">Consulta en curso</h2><div class="note">Folio ${esc(c.folio)} · el ticket quedó marcado como usado</div></div><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div>
+    <div class="modal-b">
+      <div class="paciente-ficha">
+        <div class="pf-av">${esc(iniciales(c.paciente?.nombre))}</div>
+        <div><b>${esc(c.paciente?.nombre)}</b><small>${c.paciente?.edad?esc(c.paciente.edad)+" años · ":""}${esc(c.paciente?.telefono||"sin teléfono")}</small></div>
+        <dl><div><dt>Fecha</dt><dd>${esc(fechaCorta(c.fecha))}</dd></div><div><dt>Hora</dt><dd>${esc(h12(c.hora))}</dd></div><div><dt>Motivo</dt><dd>${esc(c.paciente?.motivo||"Consulta")}</dd></div></dl>
+      </div>
+      ${c.notas?`<p class="nota-recep"><b>Nota de recepción:</b> ${esc(c.notas)}</p>`:""}
+      <label class="field" for="csRes"><span>Resumen de la consulta</span><textarea class="input" id="csRes" maxlength="3000" style="min-height:150px" placeholder="Padecimiento actual, exploración, diagnóstico…">${esc(c.consulta?.resumen||"")}</textarea></label>
+      <label class="field" for="csRec"><span>Receta</span><textarea class="input mono-suave" id="csRec" maxlength="3000" style="min-height:150px" placeholder="Medicamento — dosis — cada cuánto — por cuántos días">${esc(c.consulta?.receta||"")}</textarea></label>
+      <p class="note" style="margin:0">Al terminar, la consulta queda en tu historial y la recepción recibe la receta para enviársela al paciente en PDF.</p>
+    </div>
+    <div class="modal-f"><span class="note" id="csMsg" role="status" style="margin-right:auto;align-self:center"></span><button type="button" class="btn" data-cerrar>Seguir después</button><button type="submit" class="btn btn-primary">Terminar consulta</button></div>
+  </form>`);
+  $("#fConsulta").addEventListener("submit", async ev=>{ ev.preventDefault();
+    const resumen=$("#csRes").value.trim(), receta=$("#csRec").value.trim();
+    if(resumen.length<5){ $("#csMsg").textContent="Escribe el resumen de la consulta."; return; }
+    try{ await Store.api("POST",`/citas/${encodeURIComponent(id)}/consulta`,{accion:"finalizar", resumen, receta},{texto:"Guardando la consulta…"}); await Store.cargar({silencioso:true}); cerrarCapa(); render(); toast("Consulta guardada; la recepción enviará la receta"); }
+    catch(e){ $("#csMsg").textContent=e.message; }
+  });
+}
+function verConsulta(id){
+  const c = d().citas.find(o=>o.id===id); if(!c?.consulta) return;
+  const x = docById(c.doctorId);
+  capa(`<div class="modal flotante" role="dialog" aria-modal="true" aria-labelledby="vcT"><div class="modal-h"><div><h2 id="vcT">Consulta de ${esc(c.paciente?.nombre)}</h2><div class="note">${esc(x?.nombre||"")} · ${esc(fechaHora(c.consulta.fecha))}</div></div><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div>
+    <div class="modal-b"><h3 class="sub">Resumen</h3><p class="texto-largo">${esc(c.consulta.resumen)}</p><h3 class="sub">Receta</h3><p class="texto-largo receta">${esc(c.consulta.receta||"Sin receta")}</p></div>
+    <div class="modal-f">${esAdmin()?`<button type="button" class="btn" id="vcPdf">${ICON.pdf}Receta en PDF</button>`:""}<button type="button" class="btn btn-primary" data-cerrar>Cerrar</button></div></div>`);
+  $("#vcPdf")?.addEventListener("click",()=>pdfReceta(c));
+}
+function pdfReceta(c){
+  const { jsPDF } = window.jspdf; const pdf = new jsPDF({unit:"mm", format:"letter"}); const x = docById(c.doctorId)||{};
+  const W=215.9, M=20, negro=[12,12,12], gris=[105,105,105];
+  pdf.setProperties({title:`Receta ${c.paciente?.nombre}`, creator:"Assistant"});
+  if(MARCA_PNG) pdf.addImage(MARCA_PNG,"PNG",M,16,12,12.3);
+  pdf.setTextColor(...negro); pdf.setFont("helvetica","bold"); pdf.setFontSize(16); pdf.text(x.nombre||"", M+16, 22);
+  pdf.setFont("helvetica","normal"); pdf.setFontSize(9.5); pdf.setTextColor(...gris); pdf.text(`${x.especialidad||""}${x.cedula?` · Cédula profesional ${x.cedula}`:""}`, M+16, 27.5);
+  pdf.text(`${x.consultorio||""}${x.direccion?` · ${x.direccion}`:""}`, M+16, 32);
+  pdf.setDrawColor(12,12,12); pdf.setLineWidth(.6); pdf.line(M,38,W-M,38); pdf.setLineWidth(.2);
+  pdf.setFontSize(9.5); pdf.setTextColor(...gris); pdf.text("PACIENTE", M, 47); pdf.text("FECHA", W-M-50, 47);
+  pdf.setTextColor(...negro); pdf.setFont("helvetica","bold"); pdf.setFontSize(12); pdf.text(c.paciente?.nombre||"", M, 53); pdf.text(fechaCorta(c.fecha)+" "+fromYmd(c.fecha).getFullYear(), W-M-50, 53);
+  pdf.setFont("helvetica","normal"); pdf.setFontSize(9.5); pdf.setTextColor(...gris); if(c.paciente?.edad) pdf.text(`${c.paciente.edad} años`, M, 58.5);
+  let y=72; pdf.setFont("times","bolditalic"); pdf.setFontSize(26); pdf.setTextColor(...negro); pdf.text("Rx", M, y); y+=10;
+  pdf.setFont("helvetica","normal"); pdf.setFontSize(11.5); const ls = pdf.splitTextToSize(c.consulta?.receta || "Sin receta", W-2*M); pdf.text(ls, M, y); y += ls.length*6 + 10;
+  pdf.setDrawColor(200,200,200); pdf.line(W-M-70, 245, W-M, 245); pdf.setFontSize(9); pdf.setTextColor(...gris); pdf.text("Firma del médico", W-M-35, 250, {align:"center"});
+  pdf.setFontSize(7.5); pdf.text(`Folio ${c.folio} · Enviado por Assistant · ${EMPRESA.telefono}`, M, 268);
+  descargar(`Receta ${c.paciente?.nombre} ${c.fecha}.pdf`, pdf.output("blob"));
+}
+function cancelarConMotivo(c){
+  capa(`<form class="modal flotante" id="fCanc" role="dialog" aria-modal="true" aria-labelledby="ccT" style="width:min(500px,100%)" novalidate><div class="modal-h"><h2 id="ccT">Cancelar cita</h2><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div>
+    <div class="modal-b"><p style="margin:0">${esc(c.paciente?.nombre)} · ${esc(fechaCorta(c.fecha))} ${esc(h12(c.hora))}. La recepción recibirá el aviso para contactar al paciente.</p>
+      <label class="field" for="ccMot"><span>Motivo de la cancelación (obligatorio)</span><textarea class="input" id="ccMot" maxlength="200" placeholder="Ejemplo: urgencia en hospital"></textarea></label></div>
+    <div class="modal-f"><span class="note" id="ccMsg" role="status" style="margin-right:auto;align-self:center"></span><button type="button" class="btn" data-cerrar>Volver</button><button type="submit" class="btn btn-danger">Cancelar cita</button></div></form>`);
+  $("#fCanc").addEventListener("submit", async ev=>{ ev.preventDefault(); const m=$("#ccMot").value.trim();
+    if(m.length<5){ $("#ccMsg").textContent="Escribe el motivo (mínimo 5 letras)."; return; }
+    c.estado="cancelada"; c.motivoCancelacion=m;
+    if(await Store.guardar()){ cerrarCapa(); render(); toast("Cita cancelada; tu recepción fue avisada"); }
+  });
+}
+function historialConsultas(me){
+  const l = d().citas.filter(c=>c.doctorId===me.id && c.consulta).sort((a,b)=>(b.consulta.fecha||"").localeCompare(a.consulta.fecha||"")).slice(0,30);
+  const canc = d().citas.filter(c=>c.doctorId===me.id && c.estado==="cancelada").sort((a,b)=>(b.fecha+b.hora).localeCompare(a.fecha+a.hora)).slice(0,20);
+  return `<section class="panel"><div class="panel-h"><h2>Historial de consultas</h2><span class="chip neu">${l.length}</span></div>
+    <div class="rows">${l.length ? l.map(c=>`<button type="button" class="row" data-ver-consulta="${esc(c.id)}"><span class="when"><b class="num">${esc(h12(c.hora))}</b><small>${esc(fechaCorta(c.fecha))}</small></span><span class="who"><b>${esc(c.paciente?.nombre)}</b><small>${esc((c.consulta.resumen||"").slice(0,90))}</small></span>${c.recetaPendiente?'<span class="chip warn">Receta por enviar</span>':'<span class="chip ok">Receta enviada</span>'}</button>`).join("") : `<div class="empty"><b>Aún no hay consultas</b>Escanea el ticket del paciente y elige "Pasar a consulta".</div>`}</div></section>
+  ${canc.length?`<section class="panel"><div class="panel-h"><h2>Citas canceladas</h2><span class="chip bad">${canc.length}</span></div><div class="rows">${canc.map(c=>`<div class="row" style="cursor:default"><span class="when"><b class="num">${esc(h12(c.hora))}</b><small>${esc(fechaCorta(c.fecha))}</small></span><span class="who"><b>${esc(c.paciente?.nombre)}</b><small>${esc(c.motivoCancelacion||"Sin motivo")}</small></span><span></span></div>`).join("")}</div></section>`:""}`;
+}
+
+/* ================= datos bancarios ================= */
+const cfgGeneral = () => (d().config||[]).find(o=>o.id==="general") || { id:"general", banco:{} };
+function tarjetaBanco(b){
+  const clabe = String(b?.clabe||"").replace(/(\d{3})(\d{3})(\d{11})(\d)/,"$1 $2 $3 $4");
+  return `<div class="tarjeta-banco">
+    <div class="tb-top"><b>${esc(b?.banco||"Banco")}</b><span class="tb-chip" aria-hidden="true"></span></div>
+    <div class="tb-clabe"><small>CLABE interbancaria</small><b class="mono">${esc(clabe||"—")}</b></div>
+    <div class="tb-fila"><div><small>Titular</small><b>${esc(b?.titular||"—")}</b></div></div>
+    <div class="tb-fila"><div><small>Cuenta</small><b class="mono">${esc(b?.cuenta||"—")}</b></div><div><small>Tarjeta</small><b class="mono">${esc(b?.tarjeta||"—")}</b></div></div>
+    <div class="tb-concepto">Concepto: ${esc(b?.concepto||"Mensualidad")}</div>
+    <img class="tb-logo" src="assets/logo-a-blanco.png" alt="">
+  </div>`;
+}
+function seccionBanco(editable, me){
+  const b = cfgGeneral().banco||{};
+  return `<section class="panel panel-b banco">
+    <div class="banco-txt"><h2>${editable?"Datos bancarios para tus médicos":"Paga tu mensualidad por transferencia"}</h2>
+      <p>${editable?"Los médicos ven esta tarjeta en «Mi plan» y en la ventana de acceso suspendido.":`Transfiere ${me?dinero(me.cuota||planDe(me).precio):"tu mensualidad"} y envía tu comprobante por el chat de Mensajes.`}</p>
+      <div class="banco-acc"><button type="button" class="btn btn-sm" data-copiar="${esc(b.clabe||"")}">Copiar CLABE</button>${editable?`<button type="button" class="btn btn-sm" id="bancoEditar">Editar datos</button>`:`<button type="button" class="btn btn-sm" data-v="mensajes">Enviar comprobante</button>`}</div></div>
+    ${tarjetaBanco(b)}
+  </section>`;
+}
+function editarBanco(){
+  const b = cfgGeneral().banco||{};
+  capa(`<form class="modal flotante" id="fBanco" role="dialog" aria-modal="true" aria-labelledby="bkT" style="width:min(560px,100%)" novalidate><div class="modal-h"><h2 id="bkT">Datos bancarios</h2><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div>
+    <div class="modal-b"><div class="grid2">
+      <label class="field" for="bkBanco"><span>Banco</span><input class="input" id="bkBanco" maxlength="40" value="${esc(b.banco||"")}"></label>
+      <label class="field" for="bkTit"><span>Titular</span><input class="input" id="bkTit" maxlength="80" value="${esc(b.titular||"")}"></label>
+      <label class="field" for="bkClabe"><span>CLABE (18 dígitos)</span><input class="input mono" id="bkClabe" maxlength="18" inputmode="numeric" value="${esc(b.clabe||"")}"></label>
+      <label class="field" for="bkCta"><span>Número de cuenta</span><input class="input mono" id="bkCta" maxlength="20" value="${esc(b.cuenta||"")}"></label>
+      <label class="field" for="bkTarj"><span>Tarjeta (opcional)</span><input class="input mono" id="bkTarj" maxlength="19" value="${esc(b.tarjeta||"")}"></label>
+      <label class="field" for="bkConc"><span>Concepto</span><input class="input" id="bkConc" maxlength="80" value="${esc(b.concepto||"")}"></label></div></div>
+    <div class="modal-f"><span class="note" id="bkMsg" role="status" style="margin-right:auto;align-self:center"></span><button type="button" class="btn" data-cerrar>Cancelar</button><button type="submit" class="btn btn-primary">Guardar</button></div></form>`);
+  $("#fBanco").addEventListener("submit", async ev=>{ ev.preventDefault();
+    const clabe=$("#bkClabe").value.replace(/\D/g,""); if(clabe && clabe.length!==18){ $("#bkMsg").textContent="La CLABE debe tener 18 dígitos."; return; }
+    const cfg = cfgGeneral(); if(!(d().config||[]).includes(cfg)){ d().config = [...(d().config||[]), cfg]; }
+    cfg.banco = { banco:$("#bkBanco").value, titular:$("#bkTit").value, clabe, cuenta:$("#bkCta").value, tarjeta:$("#bkTarj").value, concepto:$("#bkConc").value };
+    if(await Store.guardar()){ cerrarCapa(); render(); toast("Datos bancarios guardados"); }
+  });
+}
+
+/* ================= ventanas especiales ================= */
+function citaCreada(c){
+  const x = docById(c.doctorId);
+  capa(`<div class="modal flotante exito" role="dialog" aria-modal="true" aria-labelledby="okCita" style="width:min(460px,100%)">
+    <div class="modal-b exito-b"><span class="exito-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+      <h2 id="okCita">Cita agendada</h2><p>${esc(c.paciente?.nombre)} con ${esc(x?.nombre||"")}<br><b>${esc(fechaLarga(c.fecha))} · ${esc(h12(c.hora))}</b></p><span class="mono folio-grande">${esc(c.folio)}</span></div>
+    <div class="modal-f" style="justify-content:center"><button type="button" class="btn" id="okVer">Ver ticket</button><button type="button" class="btn btn-primary" id="okIr">Aceptar</button></div></div>`);
+  $("#okIr").addEventListener("click",()=>{ cerrarCapa(); S.vista="citas"; S.filtro.estado="proximas"; render(); window.scrollTo({top:0}); });
+  $("#okVer").addEventListener("click",()=>{ cerrarCapa(); S.vista="citas"; render(); abrirTicket(c.id); });
+  setTimeout(()=>$("#okIr")?.focus(),60);
+}
+function pedirSalida(){
+  confirmar("Cerrar sesión", "¿Seguro que quieres salir? Tendrás que volver a escribir tu usuario y contraseña.", ()=>cerrarSesion(), false);
+}
+function ventanaPago(dt){
+  capa(`<div class="modal flotante pago" role="alertdialog" aria-modal="true" aria-labelledby="pgT" style="width:min(520px,100%)">
+    <div class="modal-b pago-b"><span class="pago-ico" aria-hidden="true">${ICON.candado}</span>
+      <h2 id="pgT">${esc(dt.titulo||"Acceso suspendido")}</h2>
+      <p>${esc(dt.error||"Tu acceso no está disponible por falta de pago.")}</p>
+      ${dt.banco?`${tarjetaBanco(dt.banco)}<p class="note" style="margin:0">Realiza tu transferencia y comunícate con tu recepción al <b>${esc(EMPRESA.telefono)}</b> para reactivar tu cuenta.</p>`:""}
+    </div>
+    <div class="modal-f" style="justify-content:center"><button type="button" class="btn btn-primary" data-cerrar>Entendido</button></div></div>`);
+}
+
+/* ================= sala de espera ================= */
+const urlSala = id => `${location.origin}/sala.html?m=${encodeURIComponent(id)}`;
+function vistaSala(){
+  const t = hoy();
+  return `<div class="head"><div><h1>Sala de espera</h1><p>Pantalla pública por médico: los pacientes ven su turno (número e iniciales) sin iniciar sesión. Ábrela en una TV o compártela por WhatsApp.</p></div></div>
+  <div class="docs">${d().doctores.map(x=>{ const hoyC=d().citas.filter(c=>c.doctorId===x.id && c.fecha===t && c.estado!=="cancelada"); const enC=hoyC.find(c=>c.enConsulta); return `
+    <article class="panel doc">
+      <div class="doc-top">${avatarDe(x)}<div style="min-width:0"><b>${esc(x.nombre)}</b><small>${esc(x.especialidad)}</small></div></div>
+      <dl class="kv"><dt>Turnos de hoy</dt><dd class="num">${hoyC.length}</dd><dt>En consulta</dt><dd>${enC?esc(enC.paciente?.nombre):"—"}</dd><dt>Atendidos</dt><dd class="num">${hoyC.filter(c=>c.estado==="atendida").length}</dd></dl>
+      <div class="doc-foot"><a class="btn btn-sm btn-primary" href="${esc(urlSala(x.id))}" target="_blank" rel="noopener">${ICON.sala}Abrir sala</a><button type="button" class="btn btn-sm" data-copiar="${esc(urlSala(x.id))}">Copiar enlace</button></div>
+    </article>`; }).join("") || `<div class="panel empty"><b>Sin médicos</b>Da de alta un suscriptor para tener su sala de espera.</div>`}</div>`;
+}
+
+/* ================= notificaciones (escritorio y celular) ================= */
+const Notif = (() => {
+  const soportado = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const b64 = s => { const p="=".repeat((4-s.length%4)%4); const r=atob((s+p).replace(/-/g,"+").replace(/_/g,"/")); return Uint8Array.from(r, c=>c.charCodeAt(0)); };
+  async function registrar(){ if(!("serviceWorker" in navigator)) return null; try{ return await navigator.serviceWorker.register("sw.js", {scope:"./"}); }catch(e){ return null; } }
+  async function suscribir(pedir){
+    if(!soportado()) return "no";
+    if(Notification.permission==="denied") return "denegado";
+    if(Notification.permission!=="granted"){ if(!pedir) return "pendiente"; const r = await Notification.requestPermission(); if(r!=="granted") return "denegado"; }
+    const reg = await registrar(); if(!reg) return "no";
+    await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub){ const { clave } = await Store.api("GET","/push/clave",undefined,{silencioso:true}); sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:b64(clave) }); }
+    await Store.api("POST","/push/suscribir",{ suscripcion: sub.toJSON() },{silencioso:true});
+    return "activo";
+  }
+  async function baja(){ try{ const reg = await navigator.serviceWorker.getRegistration(); const sub = await reg?.pushManager.getSubscription(); if(sub){ await Store.api("POST","/push/baja",{endpoint:sub.endpoint},{silencioso:true}); await sub.unsubscribe(); } }catch(e){} }
+  const estado = () => !soportado() ? "no" : Notification.permission==="granted" ? "activo" : Notification.permission==="denied" ? "denegado" : "pendiente";
+  return { suscribir, baja, estado, soportado, registrar };
+})();
+function botonNotif(){
+  const e = Notif.estado();
+  const txt = e==="activo" ? "Notificaciones activas" : e==="denegado" ? "Notificaciones bloqueadas" : e==="no" ? (/iPhone|iPad/.test(navigator.userAgent) ? "Añade a inicio para avisos" : "Sin notificaciones") : "Activar notificaciones";
+  return `<button type="button" class="btn btn-sm notif-btn ${e}" data-notif ${e==="activo"||e==="no"?"":""}>${ICON.campana}<span>${txt}</span></button>`;
+}
+document.addEventListener("click", async e=>{
+  if(e.target.closest("[data-notif]")){
+    const est = Notif.estado();
+    if(est==="no"){ return toast(/iPhone|iPad/.test(navigator.userAgent) ? "En iPhone: abre el sitio en Safari, toca Compartir → Agregar a inicio y entra desde ese ícono." : "Este navegador no admite notificaciones."); }
+    if(est==="denegado") return toast("Las bloqueaste en el navegador. Actívalas en la configuración del sitio (candado junto a la dirección).");
+    const r = await Notif.suscribir(true).catch(()=>"error");
+    if(r==="activo"){ toast("Notificaciones activadas"); Store.api("POST","/push/prueba",{},{silencioso:true}).catch(()=>{}); } else if(r==="denegado") toast("No se dieron los permisos."); else toast("No se pudieron activar las notificaciones.");
+    if(S.usuario && $("#app")) pintarNav();
+  }
+  const cp = e.target.closest("[data-copiar]"); if(cp){ try{ await navigator.clipboard.writeText(cp.dataset.copiar); toast("Copiado"); }catch(_){ toast("No se pudo copiar"); } }
+  const sl = e.target.closest("[data-sala]"); if(sl) window.open(urlSala(sl.dataset.sala), "_blank", "noopener");
+});
 
 /* ================= mensajes internos =================
    Una conversación por médico (la recepción habla con cada uno). Cada mensaje
@@ -970,7 +1223,7 @@ function marcarLeidos(conv){
     if(!esAdmin() && m.de==="admin" && !m.leidoMedico){ m.leidoMedico=true; m.leidoMedicoEn=new Date().toISOString(); cambio=true; } });
   if(cambio){ Store.guardar(); vistosMsg = sinLeer(); }
 }
-const horaMsg = iso => new Date(iso).toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
+const horaMsg = iso => { const d = new Date(iso); return h12(`${pad(d.getHours())}:${pad(d.getMinutes())}`); };
 function etiquetaDia(iso){ const f = ymd(new Date(iso)); return f===hoy() ? "Hoy" : f===addDays(hoy(),-1) ? "Ayer" : fechaLarga(f); }
 function burbuja(m){
   const mio = esAdmin() ? m.de==="admin" : m.de==="medico";
@@ -979,7 +1232,7 @@ function burbuja(m){
   return `<div class="msg ${mio?"mio":"suyo"} ${m.aviso?"aviso":""}">
     ${m.aviso?`<span class="msg-aviso">${ICON.megafono}Aviso para todos los médicos</span>`:""}
     ${m.texto?`<p>${esc(m.texto)}</p>`:""}
-    ${c?`<button type="button" class="msg-cita" data-ticket="${esc(c.id)}"><span class="num"><b>${esc(c.hora)}</b><small>${esc(fechaCorta(c.fecha))}</small></span><span><b>${esc(c.paciente?.nombre)}</b><small>${esc(c.folio)} · ${c.estado==="confirmada"?"Confirmada":c.estado==="atendida"?"Atendida":"Cancelada"}</small></span></button>`:""}
+    ${c?`<button type="button" class="msg-cita" data-ticket="${esc(c.id)}"><span class="num"><b>${esc(h12(c.hora))}</b><small>${esc(fechaCorta(c.fecha))}</small></span><span><b>${esc(c.paciente?.nombre)}</b><small>${esc(c.folio)} · ${c.estado==="confirmada"?"Confirmada":c.estado==="atendida"?"Atendida":"Cancelada"}</small></span></button>`:""}
     <span class="msg-meta">${horaMsg(m.fecha)}${mio?`<i class="leido ${leido?"si":""}" title="${leido?"Leído":"Enviado"}">${leido?'<svg width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l3 3 6-7"/><path d="M6 9l1 1 6-8"/></svg>':'<svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 6l3 3 5-7"/></svg>'}</i>`:""}</span>
   </div>`;
 }
@@ -1017,13 +1270,13 @@ function panelHilo(conv, doc){
   return `<div class="chat-hilo">
     <header class="chat-cab">
       ${doc?`<button type="button" class="x chat-atras" data-chat-atras aria-label="Volver a conversaciones"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>${avatarDe(doc)}<span><b>${esc(doc.nombre)}</b><small>${esc(doc.especialidad)} · ${esc(doc.telefono||"")}</small></span><button type="button" class="btn btn-sm" data-ver-perfil="${esc(doc.id)}" style="margin-left:auto">Perfil</button>`
-           :`<span class="brand-mark">${ICON.marca}</span><span><b>Recepción</b><small>Enlace Clínico · ${esc(EMPRESA.horario.split("·")[0].trim())}</small></span>`}
+           :`<span class="chat-logo">${LOGO_A}</span><span><b>Recepción</b><small>Assistant · ${esc(EMPRESA.horario.split("·")[0].trim())}</small></span>`}
     </header>
     <div class="chat-msgs" id="chatMsgs" aria-live="polite">${hiloHTML(conv)}</div>
     <form class="chat-escribir" id="chatForm" novalidate>
       <div class="chat-adjunto" id="chatAdjunto" hidden></div>
       <div class="chat-fila">
-        ${proximas.length?`<div class="chat-clip"><button type="button" class="x" id="chatClipBtn" aria-label="Adjuntar una cita" aria-expanded="false">${ICON.clip}</button><div class="chat-citas" id="chatCitas" hidden>${proximas.map(c=>`<button type="button" data-adj-cita="${esc(c.id)}"><b class="num">${esc(fechaCorta(c.fecha))} · ${esc(c.hora)}</b><small>${esc(c.paciente?.nombre)}</small></button>`).join("")}</div></div>`:""}
+        ${proximas.length?`<div class="chat-clip"><button type="button" class="x" id="chatClipBtn" aria-label="Adjuntar una cita" aria-expanded="false">${ICON.clip}</button><div class="chat-citas" id="chatCitas" hidden>${proximas.map(c=>`<button type="button" data-adj-cita="${esc(c.id)}"><b class="num">${esc(fechaCorta(c.fecha))} · ${esc(h12(c.hora))}</b><small>${esc(c.paciente?.nombre)}</small></button>`).join("")}</div></div>`:""}
         <textarea class="input" id="chatTexto" rows="1" maxlength="1000" placeholder="Escribe un mensaje…" aria-label="Mensaje"></textarea>
         <button type="submit" class="chat-enviar" aria-label="Enviar">${ICON.enviar}</button>
       </div>
@@ -1044,7 +1297,7 @@ function enlazarMensajes(){
   t.addEventListener("keydown",e=>{ if(e.key==="Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); $("#chatForm").requestSubmit(); } });
   const clip=$("#chatClipBtn"), lista=$("#chatCitas");
   clip?.addEventListener("click",()=>{ lista.hidden=!lista.hidden; clip.setAttribute("aria-expanded",String(!lista.hidden)); });
-  lista?.querySelectorAll("[data-adj-cita]").forEach(b=>b.addEventListener("click",()=>{ adjunto=b.dataset.adjCita; const c=d().citas.find(o=>o.id===adjunto); const box=$("#chatAdjunto"); box.hidden=false; box.innerHTML=`<span>${ICON.clip}<b>${esc(c.paciente?.nombre)}</b> · ${esc(fechaCorta(c.fecha))} ${esc(c.hora)}</span><button type="button" class="x" aria-label="Quitar cita adjunta">${ICON.cerrar}</button>`; box.querySelector("button").addEventListener("click",()=>{ adjunto=null; box.hidden=true; }); lista.hidden=true; clip.setAttribute("aria-expanded","false"); t.focus(); }));
+  lista?.querySelectorAll("[data-adj-cita]").forEach(b=>b.addEventListener("click",()=>{ adjunto=b.dataset.adjCita; const c=d().citas.find(o=>o.id===adjunto); const box=$("#chatAdjunto"); box.hidden=false; box.innerHTML=`<span>${ICON.clip}<b>${esc(c.paciente?.nombre)}</b> · ${esc(fechaCorta(c.fecha))} ${esc(h12(c.hora))}</span><button type="button" class="x" aria-label="Quitar cita adjunta">${ICON.cerrar}</button>`; box.querySelector("button").addEventListener("click",()=>{ adjunto=null; box.hidden=true; }); lista.hidden=true; clip.setAttribute("aria-expanded","false"); t.focus(); }));
   $("#chatForm").addEventListener("submit",ev=>{ ev.preventDefault(); intentar(()=>{
     const texto = limpiarTexto(t.value, 1000); const conv = miConv();
     if(!texto && !adjunto) return;
@@ -1113,7 +1366,7 @@ function vistaPerfil(x, propio){
     <div class="perfil-cuerpo">
       <div class="perfil-id">
         <div class="perfil-foto">${avatarDe(x,"perfil-av")}${propio?`<label class="perfil-foto-btn" for="pfFoto" aria-label="Cambiar foto de perfil">${ICON.camara}<input type="file" id="pfFoto" accept="image/jpeg,image/png,image/webp" hidden></label>`:""}</div>
-        <div class="perfil-nombre"><h2>${esc(x.nombre)}</h2><p>${esc(x.especialidad)}${x.cedula?` · Cédula profesional ${esc(x.cedula)}`:""}</p>
+        <div class="perfil-nombre"><h2>${esc(x.nombre)} ${insigniaPlan(pr.id)}</h2><p>${esc(x.especialidad)}${x.cedula?` · Cédula profesional ${esc(x.cedula)}`:""}</p>
           <div class="perfil-chips">${(x.servicios||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div></div>
       </div>
       <div class="perfil-grid">
@@ -1121,7 +1374,7 @@ function vistaPerfil(x, propio){
           <h3>Sobre ${propio?"mí":esc(x.nombre.split(" ").slice(0,2).join(" "))}</h3>
           ${x.descripcion?`<p class="perfil-desc">${esc(x.descripcion)}</p>`:`<p class="note">${propio?"Aún no escribes tu descripción. Cuéntale a tus pacientes tu experiencia y cómo atiendes.":"El médico aún no agrega su descripción."}</p>`}
           <h3>Certificados y cédulas</h3>
-          ${certs.length?`<ul class="certs">${certs.map(c=>`<li><button type="button" class="cert" data-cert="${esc(c.id)}" data-doc="${esc(x.id)}">${c.tipo==="pdf"?`<span class="cert-pdf">PDF</span>`:`<img src="${esc(c.data)}" alt="">`}<span><b>${esc(c.nombre)}</b><small>${c.institucion?esc(c.institucion)+" · ":""}${esc(c.anio||"")}</small></span></button>${propio?`<button type="button" class="btn btn-sm" data-cert-quitar="${esc(c.id)}">Quitar</button>`:""}</li>`).join("")}</ul>`:`<p class="note">${propio?"Agrega tus títulos, cédulas o diplomados para dar más confianza.":"Sin certificados adjuntos."}</p>`}
+          ${certs.length?`<ul class="insignias">${certs.map((c,i)=>`<li><button type="button" class="insignia-cert" data-cert="${esc(c.id)}" data-doc="${esc(x.id)}" style="--tono:${TONOS_CERT[i%TONOS_CERT.length]}">${MEDALLA}<b>${esc(c.nombre)}</b><small>${esc([c.institucion,c.anio].filter(Boolean).join(" · "))}</small><em>${c.tipo==="pdf"?"Ver PDF":"Ver certificado"}</em></button>${propio?`<button type="button" class="x quitar-cert" data-cert-quitar="${esc(c.id)}" aria-label="Quitar ${esc(c.nombre)}">${ICON.cerrar}</button>`:""}</li>`).join("")}</ul>`:`<p class="note">${propio?"Agrega tus títulos, cédulas o diplomados para dar más confianza.":"Sin certificados adjuntos."}</p>`}
         </section>
         <aside class="perfil-datos">
           <dl class="kv"><dt>Consultorio</dt><dd>${esc(x.consultorio)}</dd><dt>Dirección</dt><dd>${esc(x.direccion||"—")}</dd><dt>Teléfono</dt><dd class="num">${esc(x.telefono||"—")}</dd><dt>Horario</dt><dd>${esc(textoHorario(x))}</dd><dt>Consulta</dt><dd>${x.costoConsulta?dinero(x.costoConsulta):"—"}</dd>${!propio?`<dt>Plan</dt><dd>${esc(pr.nombre)}</dd>`:""}</dl>
@@ -1187,23 +1440,63 @@ function verCertificado(x, id){
   capa(`<div class="modal" role="dialog" aria-modal="true" aria-labelledby="crT" style="width:min(900px,100%)"><div class="modal-h"><div><h2 id="crT">${esc(c.nombre)}</h2><div class="note">${esc([c.institucion,c.anio].filter(Boolean).join(" · "))}</div></div><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div><div class="modal-b"><img src="${esc(c.data)}" alt="${esc(c.nombre)}" style="width:100%;border-radius:10px;border:1px solid var(--line)"></div></div>`);
 }
 async function descargarFicha(x, formato){
-  const el=$("#fichaPerfil"); if(!el||!x) return;
-  el.classList.add("exportando");
-  try{
-    const cv = await html2canvas(el,{scale:2,backgroundColor:"#ffffff",logging:false});
-    const nombre = `Perfil ${x.nombre}`;
-    if(formato==="png") cv.toBlob(b=>descargar(`${nombre}.png`, b), "image/png");
-    else {
-      const { jsPDF } = window.jspdf; const W=210, m=12, w=W-2*m, h=w*cv.height/cv.width;
-      const pdf = new jsPDF({unit:"mm", format:[W, Math.max(150, h+2*m+10)]});
-      pdf.setProperties({title:nombre, creator:"Enlace Clínico"});
-      pdf.addImage(cv.toDataURL("image/jpeg",.9),"JPEG",m,m,w,h);
-      pdf.setFontSize(7); pdf.setTextColor(126,146,152); pdf.text(`Ficha generada por Enlace Clínico · ${fechaHora(new Date().toISOString())}`, m, m+h+7);
-      descargar(`${nombre}.pdf`, pdf.output("blob"));
-    }
-    bitacora("Ficha de perfil descargada", x.nombre); Store.guardar();
-  }catch(e){ toast("No se pudo generar la ficha."); }
-  finally{ el.classList.remove("exportando"); }
+  if(!x) return;
+  if(formato==="png"){
+    const el=$("#fichaPerfil"); if(!el) return; el.classList.add("exportando");
+    try{ const cv = await html2canvas(el,{scale:2,backgroundColor:temaActual()==="dark"?"#0A0A0A":"#ffffff",logging:false}); cv.toBlob(b=>descargar(`Perfil ${x.nombre}.png`, b), "image/png"); }
+    catch(e){ toast("No se pudo generar la imagen."); } finally{ el.classList.remove("exportando"); }
+    return;
+  }
+  try{ pdfPerfil(x); bitacora("Ficha de perfil descargada", x.nombre); }catch(e){ console.error(e); toast("No se pudo generar el PDF."); }
+}
+/* Ficha profesional en PDF, dibujada con texto real (se puede seleccionar y se ve nítida al imprimir) */
+function pdfPerfil(x){
+  const { jsPDF } = window.jspdf; const pdf = new jsPDF({unit:"mm", format:"letter"});
+  const W=215.9, H=279.4, M=18, negro=[12,12,12], gris=[100,100,100], suave=[240,240,240], acento=[11,122,99];
+  const pl = planDe(x), certs = x.certificados||[];
+  pdf.setProperties({title:`Perfil ${x.nombre}`, creator:"Assistant"});
+  // banner
+  if(x.banner){ try{ pdf.addImage(x.banner,"JPEG",0,0,W,62,undefined,"FAST"); }catch(e){ pdf.setFillColor(...negro); pdf.rect(0,0,W,62,"F"); } }
+  else { pdf.setFillColor(...negro); pdf.rect(0,0,W,62,"F"); }
+  pdf.setFillColor(0,0,0); pdf.setGState && pdf.setGState(new pdf.GState({opacity:.35})); pdf.rect(0,0,W,62,"F"); pdf.setGState && pdf.setGState(new pdf.GState({opacity:1}));
+  if(MARCA_PNG_B) pdf.addImage(MARCA_PNG_B,"PNG",W-M-11,10,11,11.3);
+  pdf.setTextColor(255,255,255); pdf.setFont("helvetica","bold"); pdf.setFontSize(8); pdf.text("ASSISTANT · ASISTENTES EN LÍNEA", W-M-14, 17, {align:"right"});
+  // foto
+  pdf.setFillColor(255,255,255); pdf.roundedRect(M-1.5,44.5,43,43,6,6,"F");
+  if(x.foto){ try{ pdf.addImage(x.foto,"JPEG",M,46,40,40,undefined,"FAST"); }catch(e){} }
+  else { pdf.setFillColor(...acento); pdf.roundedRect(M,46,40,40,5,5,"F"); pdf.setTextColor(255,255,255); pdf.setFontSize(22); pdf.text(iniciales(x.nombre),M+20,70,{align:"center"}); }
+  // nombre y datos
+  let y = 72; const cx = M+48;
+  pdf.setTextColor(...negro); pdf.setFont("helvetica","bold"); pdf.setFontSize(20); pdf.text(x.nombre, cx, y);
+  pdf.setFont("helvetica","normal"); pdf.setFontSize(11); pdf.setTextColor(...gris);
+  pdf.text(`${x.especialidad||""}${x.cedula?`  ·  Cédula profesional ${x.cedula}`:""}`, cx, y+7);
+  // insignia del plan
+  const col = PLAN_COLORES[pl.id] || PLAN_COLORES.esencial;
+  pdf.setFillColor(...col.rgb); pdf.roundedRect(cx, y+11, 44, 7, 3.5, 3.5, "F"); pdf.setTextColor(...col.txt); pdf.setFont("helvetica","bold"); pdf.setFontSize(7.5); pdf.text(`MIEMBRO ${pl.nombre.toUpperCase()}`, cx+22, y+15.6, {align:"center"});
+  y = 102;
+  // servicios
+  if((x.servicios||[]).length){ let sx=M; pdf.setFont("helvetica","bold"); pdf.setFontSize(8.5);
+    x.servicios.forEach(t=>{ const w=pdf.getTextWidth(t)+8; if(sx+w>W-M){ sx=M; y+=9; } pdf.setFillColor(...suave); pdf.roundedRect(sx,y-5,w,7,3.5,3.5,"F"); pdf.setTextColor(...negro); pdf.text(t,sx+4,y); sx+=w+3; }); y+=12; }
+  const titulo = t => { pdf.setDrawColor(220,220,220); pdf.line(M,y,W-M,y); y+=8; pdf.setFont("helvetica","bold"); pdf.setFontSize(12); pdf.setTextColor(...negro); pdf.text(t, M, y); y+=7; };
+  // sobre el médico
+  if(x.descripcion){ titulo("Sobre el médico"); pdf.setFont("helvetica","normal"); pdf.setFontSize(10.5); pdf.setTextColor(40,40,40); const ls=pdf.splitTextToSize(x.descripcion, W-2*M); pdf.text(ls, M, y); y += ls.length*5.2 + 4; }
+  // consulta
+  titulo("Datos de consulta");
+  const filas = [["Consultorio",x.consultorio||"—"],["Dirección",x.direccion||"—"],["Teléfono",x.telefono||"—"],["Horario",textoHorario(x)],["Costo de consulta",x.costoConsulta?dinero(x.costoConsulta):"—"]];
+  filas.forEach(([k,v])=>{ pdf.setFont("helvetica","bold"); pdf.setFontSize(9.5); pdf.setTextColor(...gris); pdf.text(k, M, y); pdf.setFont("helvetica","normal"); pdf.setTextColor(...negro); const ls=pdf.splitTextToSize(String(v), W-2*M-42); pdf.text(ls, M+42, y); y += Math.max(6, ls.length*4.8+1.5); });
+  // certificados como insignias
+  if(certs.length){ y+=2; titulo("Certificaciones");
+    const bw=(W-2*M-8)/3; certs.forEach((c,i)=>{ const col=i%3, fila=Math.floor(i/3); const bx=M+col*(bw+4), by=y+fila*26;
+      if(by>H-30) return;
+      pdf.setFillColor(...suave); pdf.roundedRect(bx,by,bw,22,3,3,"F");
+      pdf.setFillColor(...acento); pdf.circle(bx+8,by+11,5,"F"); pdf.setDrawColor(255,255,255); pdf.setLineWidth(.7); pdf.lines([[1.6,1.6],[3,-3.4]], bx+5.6, by+11); pdf.setLineWidth(.2);
+      pdf.setTextColor(...negro); pdf.setFont("helvetica","bold"); pdf.setFontSize(8.5); pdf.text(pdf.splitTextToSize(c.nombre, bw-18).slice(0,2), bx+16, by+9);
+      pdf.setFont("helvetica","normal"); pdf.setFontSize(7.5); pdf.setTextColor(...gris); pdf.text([c.institucion,c.anio].filter(Boolean).join(" · "), bx+16, by+17.5); });
+    y += Math.ceil(certs.length/3)*26; }
+  // pie
+  pdf.setFillColor(...negro); pdf.rect(0,H-14,W,14,"F"); pdf.setTextColor(255,255,255); pdf.setFont("helvetica","normal"); pdf.setFontSize(8);
+  pdf.text(`Agenda tu cita con Assistant · Tel. ${EMPRESA.telefono} · ${EMPRESA.correo}`, M, H-6); pdf.text(`Ficha generada el ${fechaLarga(hoy())}`, W-M, H-6, {align:"right"});
+  descargar(`Perfil ${x.nombre}.pdf`, pdf.output("blob"));
 }
 
 /* ================= disponibilidad del médico =================
@@ -1236,7 +1529,7 @@ function aplicarDisponibilidad(doc, cambios, descripcion){
   });
   if(!afect.length) return ejecutar();
   confirmar("Hay citas en esas fechas",
-    `${afect.length} cita(s) confirmada(s) quedan fuera de tu disponibilidad: ${afect.slice(0,4).map(c=>`${fechaCorta(c.fecha)} ${c.hora} (${c.paciente?.nombre})`).join(", ")}${afect.length>4?"…":""}. Se cancelarán y tu recepción avisará a cada paciente.`,
+    `${afect.length} cita(s) confirmada(s) quedan fuera de tu disponibilidad: ${afect.slice(0,4).map(c=>`${fechaCorta(c.fecha)} ${h12(c.hora)} (${c.paciente?.nombre})`).join(", ")}${afect.length>4?"…":""}. Se cancelarán y tu recepción avisará a cada paciente.`,
     ejecutar, true);
 }
 function seccionDisponibilidad(me){
@@ -1268,7 +1561,7 @@ function seccionDisponibilidad(me){
         <label class="field" for="bMotivo"><span>Nota (opcional)</span><input class="input" id="bMotivo" maxlength="60" placeholder="Paciente particular, cirugía…"></label>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;align-items:center;flex-wrap:wrap"><span class="note" id="bMsg" role="status"></span><button type="submit" class="btn">Bloquear esta hora</button></div>
-      ${bloq.length?`<ul class="aus-lista bloq-lista">${bloq.map(bq=>`<li><span><b>${esc(fechaLarga(bq.fecha))} · <span class="num">${esc(bq.desde)}–${esc(bq.hasta)}</span></b>${bq.motivo?`<small>${esc(bq.motivo)}</small>`:""}</span><button type="button" class="btn btn-sm" data-bloq-quitar="${esc(bq.id)}">Liberar</button></li>`).join("")}</ul>`:`<p class="note" style="margin:0">No tienes horas bloqueadas.</p>`}
+      ${bloq.length?`<ul class="aus-lista bloq-lista">${bloq.map(bq=>`<li><span><b>${esc(fechaLarga(bq.fecha))} · <span class="num">${esc(h12(bq.desde))} a ${esc(h12(bq.hasta))}</span></b>${bq.motivo?`<small>${esc(bq.motivo)}</small>`:""}</span><button type="button" class="btn btn-sm" data-bloq-quitar="${esc(bq.id)}">Liberar</button></li>`).join("")}</ul>`:`<p class="note" style="margin:0">No tienes horas bloqueadas.</p>`}
     </form>
     <form id="fAus" class="disp-bloque" novalidate>
       <b>Días completos que no voy a atender</b>
@@ -1448,6 +1741,10 @@ function enlazar(){
   $("#agHoraExacta")?.addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); $("#agUsarHora").click(); } });
   v.querySelectorAll("[data-aviso-ok]").forEach(b=>b.addEventListener("click",()=>intentar(()=>{ exigir("admin"); const c=d().citas.find(o=>o.id===b.dataset.avisoOk); if(!c) return; c.avisoPendiente=false; c.avisado=new Date().toISOString(); bitacora("Paciente avisado de cancelación", `${c.folio} · ${c.paciente?.nombre}`); Store.guardar(); render(); toast("Marcado como avisado"); })));
   v.querySelectorAll("[data-reubicar]").forEach(b=>b.addEventListener("click",()=>{ const c=d().citas.find(o=>o.id===b.dataset.reubicar); if(!c) return; const no=puede(docById(c.doctorId),"reagendar"); if(no) return toast(no); reagendar(c, true); }));
+  v.querySelectorAll("[data-ver-consulta]").forEach(b=>b.addEventListener("click",()=>verConsulta(b.dataset.verConsulta)));
+  v.querySelectorAll("[data-receta-pdf]").forEach(b=>b.addEventListener("click",()=>{ const c=d().citas.find(o=>o.id===b.dataset.recetaPdf); if(c) pdfReceta(c); }));
+  v.querySelectorAll("[data-receta-ok]").forEach(b=>b.addEventListener("click",()=>intentar(async()=>{ exigir("admin"); const c=d().citas.find(o=>o.id===b.dataset.recetaOk); if(!c) return; c.recetaPendiente=false; c.recetaEnviada=new Date().toISOString(); if(await Store.guardar()){ bitacora("Receta enviada al paciente", `${c.folio} · ${c.paciente?.nombre}`); render(); toast("Marcada como enviada"); } })));
+  $("#bancoEditar")?.addEventListener("click", editarBanco);
   v.querySelectorAll("[data-plan-edit]").forEach(b=>b.addEventListener("click",()=>formPlan(planPorId(b.dataset.planEdit))));
   v.querySelectorAll("[data-plan-nuevo]").forEach(b=>b.addEventListener("click",()=>formPlan()));
   v.querySelectorAll("[data-sol-si]").forEach(b=>b.addEventListener("click",()=>resolverSolicitud(b.dataset.solSi,true)));
@@ -1461,7 +1758,6 @@ function enlazar(){
   const vg=$("#vgo"); if(vg){ vg.addEventListener("click",verificar); $("#vq").addEventListener("keydown",e=>{ if(e.key==="Enter") verificar(); }); }
   $("#scanGo")?.addEventListener("click",()=>Escaner.iniciar());
   $("#scanStop")?.addEventListener("click",()=>Escaner.detener());
-  $("#bReset")?.addEventListener("click",()=>confirmar("Restablecer datos de prueba","Se borrarán en el servidor todos los médicos, citas, mensajes y cuentas, y se volverán a crear los usuarios de prueba. Afecta a todos los que usen el sistema.",async()=>{ try{ await Store.api("POST","/demo/reset"); toast("Datos de prueba restablecidos"); cerrarSesion(); }catch(e){ toast(e.message); } },true));
   enlazarCambio();
   enlazarDisponibilidad();
   enlazarPerfil();
@@ -1472,7 +1768,7 @@ function enlazar(){
 }
 function pintarHoraElegida(){
   const info=$("#agHoraInfo"); if(!info) return; const x=docById(S.ag.doctorId);
-  info.innerHTML = S.ag.hora ? `Hora elegida: <b class="num">${esc(S.ag.hora)}</b> · termina ${esc(hhmm(minutos(S.ag.hora)+Number(x?.horario?.duracion||30)))}` : "";
+  info.innerHTML = S.ag.hora ? `Hora elegida: <b class="num">${esc(h12(S.ag.hora))}</b> · termina ${esc(h12(hhmm(minutos(S.ag.hora)+Number(x?.horario?.duracion||30))))}` : "";
 }
 const CAMPOS_P = ["pNombre","pTel","pEdad","pMotivo","pNotas"];
 const BORRADOR = "enlace-clinico:borrador";
@@ -1504,7 +1800,7 @@ async function agendar(ev){
   const guardada = d().citas.find(o=>o.id===c.id);
   bitacora("Cita agendada", `${guardada.folio} · ${docById(c.doctorId)?.nombre} · ${c.fecha} ${c.hora}`);
   try{ sessionStorage.removeItem(BORRADOR); }catch(e){}
-  S.ag.hora=""; render(); toast("Cita agendada"); abrirTicket(c.id);
+  S.ag.hora=""; render(); citaCreada(guardada);
 }
 
 function registrarPago(id){ intentar(()=>{
@@ -1541,7 +1837,7 @@ function capa(html){
 function cerrarCapa(){ $("#layer").innerHTML=""; document.body.style.overflow=""; focoPrevio?.focus?.(); }
 document.addEventListener("keydown",e=>{ if(e.key!=="Escape") return; if(selAbierto){ cerrarSel(); return; } if($("#ov")) cerrarCapa(); });
 function confirmar(titulo, texto, accion, peligro){
-  capa(`<div class="modal" role="dialog" aria-modal="true" aria-labelledby="cfT" style="width:min(460px,100%)"><div class="modal-h"><h2 id="cfT">${esc(titulo)}</h2><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div><div class="modal-b"><p style="margin:0">${esc(texto)}</p></div><div class="modal-f"><button type="button" class="btn" data-cerrar>Volver</button><button type="button" class="btn ${peligro?"btn-danger":"btn-primary"}" id="cfOk">Confirmar</button></div></div>`);
+  capa(`<div class="modal flotante" role="dialog" aria-modal="true" aria-labelledby="cfT" style="width:min(460px,100%)"><div class="modal-h"><h2 id="cfT">${esc(titulo)}</h2><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div><div class="modal-b"><p style="margin:0">${esc(texto)}</p></div><div class="modal-f"><button type="button" class="btn" data-cerrar>Volver</button><button type="button" class="btn ${peligro?"btn-danger":"btn-primary"}" id="cfOk">Confirmar</button></div></div>`);
   $("#cfOk").addEventListener("click",()=>{ cerrarCapa(); accion(); });
 }
 
@@ -1551,11 +1847,11 @@ function htmlPase(c){
   const marcaBlanca = ICON.marca.replace('stroke="currentColor"','stroke="#fff"').replace('width="18" height="18"','width="13" height="13"');
   return `<div class="pass" id="pase">
     <div class="pass-main">
-      <div class="pass-top"><div class="pass-brand"><i>${marcaBlanca}</i>Enlace Clínico</div><span class="pass-status ${esc(c.estado)}">${c.estado==="confirmada"?"Cita confirmada":c.estado==="atendida"?"Atendida":"Cancelada"}</span></div>
+      <div class="pass-top"><div class="pass-brand"><img src="assets/logo-a-negro.png" alt="" class="pass-logo">ASSISTANT</div><span class="pass-status ${esc(c.estado)}">${c.estado==="confirmada"?"Cita confirmada":c.estado==="atendida"?"Atendida":"Cancelada"}</span></div>
       <div><div class="pass-kind">Paciente</div><div class="pass-patient">${esc(c.paciente?.nombre)}</div></div>
       <div class="pass-grid">
         <div class="pass-big"><span>Fecha</span><b>${esc(fromYmd(c.fecha).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"}))}</b></div>
-        <div class="pass-big"><span>Hora</span><b>${esc(c.hora)} h</b></div>
+        <div class="pass-big"><span>Hora</span><b>${esc(h12(c.hora))} h</b></div>
         <div><span>Médico</span><b>${esc(x.nombre)}</b></div>
         <div><span>Especialidad</span><b>${esc(x.especialidad||"—")}</b></div>
         <div><span>Consultorio</span><b>${esc(x.consultorio||"—")}</b></div>
@@ -1579,13 +1875,17 @@ function abrirTicket(id){
   capa(`<div class="modal" role="dialog" aria-modal="true" aria-labelledby="tkT">
     <div class="modal-h"><div><h2 id="tkT">Ticket ${esc(c.folio)}</h2><div class="note">Agendado ${esc(fechaHora(c.creado))}${c.creadoPor?` por @${esc(c.creadoPor)}`:""}</div></div><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div>
     <div class="modal-b"><div class="ticket-stage">${htmlPase(c)}</div>
+      ${c.folioTemporal && new Date(c.folioTemporal.expira) > new Date() ? `<div class="folio-temp">${ICON.reloj}<span>Folio temporal <b class="mono">${esc(c.folioTemporal.codigo)}</b> · válido hasta las ${esc(h12(`${pad(new Date(c.folioTemporal.expira).getHours())}:${pad(new Date(c.folioTemporal.expira).getMinutes())}`))}</span><button type="button" class="btn btn-sm" data-copiar-temp="${esc(c.folioTemporal.codigo)}">Copiar</button></div>` : ""}
       ${adm?`<dl class="kv"><dt>Tel. paciente</dt><dd class="num">${esc(c.paciente?.telefono||"—")}</dd><dt>Edad</dt><dd>${esc(c.paciente?.edad||"—")}</dd></dl>`:`<dl class="kv"><dt>Tel. paciente</dt><dd class="num">${esc(c.paciente?.telefono||"—")}</dd><dt>Edad</dt><dd>${esc(c.paciente?.edad||"—")}</dd></dl>`}
     </div>
     <div class="modal-f">
       ${adm && c.estado!=="cancelada" ? `<button type="button" class="btn btn-danger" id="tkCancel">Cancelar</button>` : ""}
       ${adm && c.estado==="confirmada" ? `<button type="button" class="btn" id="tkMover">Reagendar</button>` : ""}
-      ${c.estado==="confirmada" ? `<button type="button" class="btn" id="tkDone">Marcar atendida</button>` : ""}
+      ${adm && c.estado==="confirmada" ? `<button type="button" class="btn" id="tkDone">Marcar atendida</button>` : ""}
       ${adm && c.estado!=="confirmada" ? `<button type="button" class="btn" id="tkRe">Volver a confirmar</button>` : ""}
+      ${adm && c.estado==="confirmada" && !c.usado ? `<button type="button" class="btn" id="tkTemp">${ICON.reloj}Folio temporal</button>` : ""}
+      ${!adm && c.estado==="confirmada" ? `<button type="button" class="btn btn-danger" id="tkCancelMed">Cancelar</button><button type="button" class="btn" id="tkHoraMed">Cambiar hora</button><button type="button" class="btn btn-primary" id="tkConsulta">${c.enConsulta?"Continuar consulta":"Pasar a consulta"}</button>` : ""}
+      ${c.consulta ? `<button type="button" class="btn" id="tkVerConsulta">Ver consulta</button>` : ""}
       <button type="button" class="btn" id="tkPng">${ICON.png}Imagen</button>
       <button type="button" class="btn btn-primary" id="tkPdf">${ICON.pdf}PDF</button>
     </div></div>`);
@@ -1596,25 +1896,31 @@ function abrirTicket(id){
   $("#tkDone")?.addEventListener("click",()=>cambiarEstadoCita(c.id,"atendida"));
   $("#tkRe")?.addEventListener("click",()=>cambiarEstadoCita(c.id,"confirmada"));
   $("#tkMover")?.addEventListener("click",()=>{ const no=puede(docById(c.doctorId),"reagendar"); no ? toast(no) : reagendar(c); });
+  $("#tkTemp")?.addEventListener("click", async()=>{ try{ const r = await Store.api("POST",`/citas/${encodeURIComponent(c.id)}/folio-temporal`,undefined,{texto:"Generando folio temporal…"}); const i=d().citas.findIndex(o=>o.id===c.id); if(i>=0) d().citas[i]=r.data; await Store.cargar({silencioso:true}); abrirTicket(c.id); toast(`Folio temporal ${r.data.folioTemporal.codigo} (1 hora)`); }catch(e){ toast(e.message); } });
+  document.querySelector("[data-copiar-temp]")?.addEventListener("click",async e=>{ try{ await navigator.clipboard.writeText(e.currentTarget.dataset.copiarTemp); toast("Folio copiado"); }catch(_){ toast("Selecciona el folio y cópialo"); } });
+  $("#tkConsulta")?.addEventListener("click",()=>abrirConsulta(c.id));
+  $("#tkHoraMed")?.addEventListener("click",()=>reagendar(c));
+  $("#tkCancelMed")?.addEventListener("click",()=>cancelarConMotivo(c));
+  $("#tkVerConsulta")?.addEventListener("click",()=>verConsulta(c.id));
 }
 function reagendar(c, desdeAviso){
   const x = docById(c.doctorId); let fecha=c.fecha, hora="";
   const dias = Array.from({length:60},(_,i)=>addDays(hoy(),i));
   const pintar = () => {
     $("#rgDias").innerHTML = dias.map(f=>{ const fd=fromYmd(f); const ok=horarios(x,f,c.id).some(h=>h.libre); return `<button type="button" data-f="${f}" aria-pressed="${f===fecha}" ${ok?"":"disabled"}><small>${DIAS[fd.getDay()]}</small><b class="num">${fd.getDate()}</b><small>${esc(fd.toLocaleDateString("es-MX",{month:"short"}))}</small></button>`; }).join("");
-    const s=horarios(x,fecha,c.id); $("#rgHoras").innerHTML = s.length ? s.map(h=>`<button type="button" data-h="${h.hora}" aria-pressed="${h.hora===hora}" ${h.libre?"":"disabled"}>${h.hora}</button>`).join("") : `<p class="note">No atiende este día.</p>`;
+    const s=horarios(x,fecha,c.id); $("#rgHoras").innerHTML = s.length ? s.map(h=>`<button type="button" data-h="${h.hora}" aria-pressed="${h.hora===hora}" ${h.libre?"":"disabled"}>${h12(h.hora)}</button>`).join("") : `<p class="note">No atiende este día.</p>`;
   };
-  capa(`<div class="modal" role="dialog" aria-modal="true" aria-labelledby="rgT"><div class="modal-h"><h2 id="rgT">Reagendar ${esc(c.folio)}</h2><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div>
+  capa(`<div class="modal flotante" role="dialog" aria-modal="true" aria-labelledby="rgT"><div class="modal-h"><h2 id="rgT">${esAdmin()?"Reagendar":"Cambiar hora de"} ${esc(c.folio)}</h2><button type="button" class="x" data-cerrar aria-label="Cerrar">${ICON.cerrar}</button></div>
     <div class="modal-b"><p class="note" style="margin:0">${esc(c.paciente?.nombre)} con ${esc(x?.nombre)}. Al reagendar se genera un nuevo folio y QR; el ticket anterior deja de ser válido.</p><div class="days" id="rgDias"></div><div class="pick" id="rgHoras"></div></div>
     <div class="modal-f"><span class="note" id="rgMsg" role="status" style="margin-right:auto;align-self:center"></span><button type="button" class="btn" data-cerrar>Cancelar</button><button type="button" class="btn btn-primary" id="rgOk">Guardar nuevo horario</button></div></div>`);
   pintar();
   $("#rgDias").addEventListener("click",e=>{ const b=e.target.closest("[data-f]"); if(b){ fecha=b.dataset.f; hora=""; pintar(); } });
   $("#rgHoras").addEventListener("click",e=>{ const b=e.target.closest("[data-h]"); if(b){ hora=b.dataset.h; pintar(); } });
   $("#rgOk").addEventListener("click", async()=>{
-    try{ exigir("admin"); }catch(e){ return toast(e.message); }
+    try{ esAdmin() ? exigir("admin") : exigir("medico", c.doctorId); }catch(e){ return toast(e.message); }
     if(!hora){ $("#rgMsg").textContent="Elige la nueva hora."; return; }
     { const no=conflicto(docById(c.doctorId),fecha,hora,c.id,durCita(c,docById(c.doctorId))); if(no){ $("#rgMsg").textContent=no; return; } }
-    const antes=`${c.fecha} ${c.hora}`; c.fecha=fecha; c.hora=hora; if(desdeAviso){ c.estado="confirmada"; c.avisoPendiente=false; delete c.motivoCancelacion; } c.folio=nuevoFolio(); c.actualizado=new Date().toISOString();
+    const antes=`${c.fecha} ${c.hora}`; c.fecha=fecha; c.hora=hora; if(desdeAviso){ c.estado="confirmada"; c.avisoPendiente=false; delete c.motivoCancelacion; } if(esAdmin()) c.folio=nuevoFolio(); c.actualizado=new Date().toISOString();
     if(!(await Store.guardar())) return;
     bitacora("Cita reagendada", `${c.folio} · de ${antes} a ${fecha} ${hora}`); render(); toast("Cita reagendada; se generó un ticket nuevo"); abrirTicket(c.id);
   });
@@ -1632,19 +1938,19 @@ async function descargarPng(c){
 function descargarPdf(c){
   const { jsPDF } = window.jspdf; const x = docById(c.doctorId) || {};
   const pdf = new jsPDF({unit:"mm", format:[210,99], orientation:"landscape"});
-  pdf.setProperties({title:`Ticket ${c.folio}`, subject:"Cita médica", creator:"Enlace Clínico"});
+  pdf.setProperties({title:`Ticket ${c.folio}`, subject:"Cita médica", creator:"Assistant"});
   const W=210, H=99, stub=62, verde=[11,122,99], tinta=[16,36,42], gris=[126,146,152], crema=[247,231,198], cafe=[90,62,12];
   pdf.setFillColor(255,255,255); pdf.rect(0,0,W,H,"F");
   pdf.setFillColor(...verde); pdf.rect(0,0,W-stub,4,"F");
   pdf.setFillColor(...crema); pdf.rect(W-stub,0,stub,H,"F");
   pdf.setDrawColor(...cafe); pdf.setLineDashPattern([1.2,1.4],0); pdf.setLineWidth(.4); pdf.line(W-stub,6,W-stub,H-6); pdf.setLineDashPattern([],0);
   pdf.setFillColor(...verde); pdf.roundedRect(10,10,7,7,1.6,1.6,"F"); if(MARCA_PNG) pdf.addImage(MARCA_PNG,"PNG",10.6,10.6,5.8,5.8);
-  pdf.setTextColor(...verde); pdf.setFont("helvetica","bold"); pdf.setFontSize(12); pdf.text("Enlace Clínico",19.5,15.3);
+  pdf.setTextColor(...verde); pdf.setFont("helvetica","bold"); pdf.setFontSize(12); pdf.text("Assistant",19.5,15.3);
   const est = c.estado==="confirmada"?"CITA CONFIRMADA":c.estado==="atendida"?"ATENDIDA":"CANCELADA";
   pdf.setFontSize(7); pdf.setTextColor(...(c.estado==="cancelada"?[180,52,45]:verde)); pdf.text(est,W-stub-10,14.6,{align:"right"});
   pdf.setTextColor(...gris); pdf.setFontSize(6.5); pdf.text("PACIENTE",10,26);
   pdf.setTextColor(...tinta); pdf.setFontSize(17); pdf.text(pdf.splitTextToSize(c.paciente?.nombre||"",W-stub-20)[0],10,33);
-  const celdas = [["FECHA",fromYmd(c.fecha).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"}),true],["HORA",`${c.hora} h`,true],
+  const celdas = [["FECHA",fromYmd(c.fecha).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"}),true],["HORA",h12(c.hora),true],
     ["MÉDICO",x.nombre||"—"],["ESPECIALIDAD",x.especialidad||"—"],["CONSULTORIO",x.consultorio||"—"],["DIRECCIÓN",x.direccion||"—"],["MOTIVO",c.paciente?.motivo||"Consulta"],["TELÉFONO DEL CONSULTORIO",x.telefono||"—"]];
   const colW=(W-stub-20)/2; let y=42;
   celdas.forEach(([k,v,big],i)=>{ const cx=10+(i%2)*colW; if(i%2===0 && i) y+= i<=2?11:8.5;
@@ -1671,13 +1977,19 @@ function tarjetaVerificacion(tipo, titulo, texto, filas){
 }
 async function verificar(){
   const entrada = $("#vq"), out=$("#vres"); const t = limpiar(entrada.value, 800); if(!t){ out.innerHTML=""; return; }
-  const q = leerCodigo(t); if(q.folio) entrada.value = q.folio;
+  const q = /^T-/i.test(t) ? { folio:t.toUpperCase() } : leerCodigo(t); if(q.folio) entrada.value = q.folio;
   out.innerHTML = `<p class="note" style="margin:0">Verificando…</p>`;
   try{
     const r = await Store.api("POST","/verificar",{ codigo:t },{texto:"Verificando el ticket…"});
     const c = r.cita;
-    const filas = c ? [["Folio",c.folio],["Paciente",c.paciente||"—"],["Médico",c.medico||"—"],["Fecha",fechaLarga(c.fecha)],["Hora",`${c.hora} h`],["Estado",c.estado==="confirmada"?"Confirmada":c.estado==="atendida"?"Atendida":"Cancelada"]] : null;
+    const filas = c ? [["Folio",c.folio],["Paciente",c.paciente||"—"],["Médico",c.medico||"—"],["Fecha",fechaLarga(c.fecha)],["Hora",h12(c.hora)],["Estado",c.estado==="confirmada"?"Confirmada":c.estado==="atendida"?"Atendida":"Cancelada"]] : null;
     out.innerHTML = tarjetaVerificacion(r.tipo==="ok"?"ok":"bad", r.titulo, r.texto, filas);
+    if(r.tipo==="ok" && c?.id && !esAdmin()){
+      await Store.cargar({silencioso:true});
+      out.insertAdjacentHTML("beforeend", `<div class="verif-opciones"><button type="button" class="btn btn-primary" data-op="consulta">${ICON.estetoscopio}${c.enConsulta?"Continuar consulta":"Pasar a consulta"}</button><button type="button" class="btn" data-op="hora">${ICON.reloj}Cambiar de hora</button><button type="button" class="btn btn-danger" data-op="cancelar">Cancelar cita</button></div>`);
+      out.querySelectorAll("[data-op]").forEach(b=>b.addEventListener("click",()=>{ const cita=d().citas.find(o=>o.id===c.id); if(!cita) return toast("Recarga la página e intenta de nuevo.");
+        if(b.dataset.op==="consulta") abrirConsulta(cita.id); else if(b.dataset.op==="hora") reagendar(cita); else cancelarConMotivo(cita); }));
+    }
   }catch(e){
     out.innerHTML = tarjetaVerificacion("bad", "No se pudo verificar", e.message);
   }
@@ -1779,7 +2091,7 @@ function mostrarCredenciales(box, usuario, pass){
 
 /* ================= arranque ================= */
 (async()=>{
-  if(!window.crypto?.subtle){ $("#root").innerHTML = `<div class="empty" style="padding-top:20vh"><b>Navegador no compatible</b>Abre Enlace Clínico en un navegador actualizado y con conexión segura (https).</div>`; return; }
+  if(!window.crypto?.subtle){ $("#root").innerHTML = `<div class="empty" style="padding-top:20vh"><b>Navegador no compatible</b>Abre Assistant en un navegador actualizado y con conexión segura (https).</div>`; return; }
   if(Store.token && leerSesion()){
     try{
       $("#root").innerHTML = `<div class="empty" style="padding-top:20vh"><b>Cargando tu agenda…</b></div>`;

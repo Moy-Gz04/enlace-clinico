@@ -39,7 +39,7 @@ async function reglaDoctores(u, previo, nuevo, id) {
 }
 
 /* ---------------- citas ---------------- */
-const CAMPOS_MEDICO_CITA = ["estado", "motivoCancelacion", "canceladaPor", "cancelada", "avisoPendiente", "actualizado"];
+const CAMPOS_MEDICO_CITA = ["estado", "motivoCancelacion", "canceladaPor", "cancelada", "avisoPendiente", "actualizado", "fecha", "hora"];
 async function reglaCitas(u, previo, nuevo, id) {
   let c;
   if (esAdmin(u)) {
@@ -49,7 +49,10 @@ async function reglaCitas(u, previo, nuevo, id) {
     if (!previo || previo.doctorId !== u.doctorId) no("Esta cita no pertenece a tu consultorio.");
     const cambios = solo(nuevo, CAMPOS_MEDICO_CITA);
     if (cambios.estado && !["atendida", "cancelada", previo.estado].includes(cambios.estado)) no("No puedes cambiar la cita a ese estado.");
+    if (previo.usado && (cambios.fecha || cambios.hora) && (cambios.fecha !== previo.fecha || cambios.hora !== previo.hora)) no("Esta cita ya pasó a consulta; no se puede cambiar de hora.");
+    if (cambios.estado === "cancelada" && previo.estado !== "cancelada" && limpiar(cambios.motivoCancelacion, 200).length < 5) no("Escribe el motivo de la cancelación.", 400);
     c = { ...previo, ...cambios, id };
+    if (c.estado === "cancelada" && previo.estado !== "cancelada") { c.motivoCancelacion = limpiar(c.motivoCancelacion, 200); c.canceladaPor = u.usuario; c.cancelada = new Date().toISOString(); c.avisoPendiente = true; }
   }
   const doc = await docGet("doctores", c.doctorId);
   if (!doc) no("El médico de la cita no existe.", 400);
@@ -66,7 +69,7 @@ async function reglaCitas(u, previo, nuevo, id) {
   }
   // el horario solo se valida cuando la cita queda (o vuelve a quedar) confirmada en un horario nuevo
   const cambiaHorario = !previo || previo.fecha !== c.fecha || previo.hora !== c.hora || (previo.estado !== "confirmada" && c.estado === "confirmada");
-  if (esAdmin(u) && c.estado === "confirmada" && cambiaHorario) {
+  if (c.estado === "confirmada" && cambiaHorario) {
     const motivo = conflicto(doc, c.fecha, c.hora, todas, id, c.duracion);
     if (motivo) no(motivo, 409);
     if (previo && (previo.fecha !== c.fecha || previo.hora !== c.hora)) c.token = randHex(8);   // reagendar invalida el ticket anterior
@@ -118,7 +121,15 @@ async function reglaMensajes(u, previo, nuevo, id) {
     fecha: new Date().toISOString(), leidoAdmin: esAdmin(u), leidoMedico: !esAdmin(u) };
 }
 
-export const REGLAS = { doctores: reglaDoctores, citas: reglaCitas, planes: reglaPlanes, solicitudes: reglaSolicitudes, mensajes: reglaMensajes };
+/* ---------------- configuración general (datos bancarios) ---------------- */
+async function reglaConfig(u, previo, nuevo, id) {
+  if (!esAdmin(u)) no("Solo la recepción puede cambiar la configuración.");
+  if (id !== "general") no("Configuración no válida.", 400);
+  const b = nuevo.banco || {};
+  return { id, banco: { banco: limpiar(b.banco, 40), titular: limpiar(b.titular, 80), clabe: limpiar(b.clabe, 18).replace(/\D/g, ""), cuenta: limpiar(b.cuenta, 20), tarjeta: limpiar(b.tarjeta, 19), concepto: limpiar(b.concepto, 80) } };
+}
+
+export const REGLAS = { doctores: reglaDoctores, citas: reglaCitas, planes: reglaPlanes, solicitudes: reglaSolicitudes, mensajes: reglaMensajes, config: reglaConfig };
 
 export function puedeBorrar(u, col, previo) {
   if (esAdmin(u)) return true;

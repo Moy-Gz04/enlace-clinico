@@ -16,13 +16,14 @@ import jwt from "jsonwebtoken";
 import { q, crearEsquema, docsDe, docGet, docPut, docDel, bitacora, version, tocar } from "./db.js";
 import { REGLAS, puedeBorrar, Rechazo } from "./rules.js";
 import { sembrar } from "./seed.js";
-import { randHex, validarPassword, passwordTemporal, firmaTexto, igualSeguro, limpiar, firmar } from "./util.js";
+import { iniciarPush, iniciarAvisos, clavePublica, enviarPush, bloqueoPorPago, hora12 } from "./avisos.js";
+import { randHex, validarPassword, passwordTemporal, firmaTexto, igualSeguro, limpiar, limpiarTexto, firmar, aleatorio, hoy } from "./util.js";
 
 for (const k of ["DATABASE_URL", "JWT_SECRET", "TICKET_SECRET"]) {
   if (!process.env[k]) { console.error(`Falta la variable de entorno ${k}`); process.exit(1); }
 }
 const ORIGENES = (process.env.CORS_ORIGIN || "https://enlace-clinico.netlify.app").split(",").map(s => s.trim());
-const COLECCIONES = ["doctores", "citas", "planes", "solicitudes", "mensajes"];
+const COLECCIONES = ["doctores", "citas", "planes", "solicitudes", "mensajes", "config"];
 const USUARIO_RE = /^[a-z0-9._-]{4,32}$/;
 
 const app = express();
@@ -78,6 +79,14 @@ app.post("/api/auth/login", limiteLogin, envolver(async (req, res) => {
     } else await bitacora(usuario, "Intento de acceso fallido", "Usuario inexistente");
     return res.status(401).json({ error: "Usuario o contraseña incorrectos." });
   }
+  if (u.rol === "medico") {
+    const bloqueo = bloqueoPorPago(await docGet("doctores", u.doctor_id));
+    if (bloqueo) {
+      await bitacora(u.usuario, "Acceso negado por falta de pago", bloqueo.titulo);
+      const cfg = await docGet("config", "general");
+      return res.status(402).json({ error: bloqueo.texto, codigo: "pago", titulo: bloqueo.titulo, banco: cfg?.banco || null });
+    }
+  }
   await q(`UPDATE usuarios SET intentos=0, bloqueo_hasta=NULL, ultimo_acceso=now() WHERE id=$1`, [u.id]);
   await bitacora(u.usuario, "Inicio de sesión");
   res.json({ token: firmarToken(u), usuario: publico(u) });
@@ -108,7 +117,7 @@ app.get("/api/estado", auth, envolver(async (req, res) => {
     adm ? docsDe("solicitudes") : docsDe("solicitudes", "doctorId", did),
     adm ? docsDe("mensajes") : docsDe("mensajes", "conv", did),
   ]);
-  const out = { version: await version(), doctores, citas, planes, solicitudes, mensajes, usuarios: [], bitacora: [] };
+  const out = { version: await version(), doctores, citas, planes, solicitudes, mensajes, config: await docsDe("config"), usuarios: [], bitacora: [] };
   if (adm) {
     out.usuarios = (await q(`SELECT id,usuario,rol,doctor_id,activo,debe_cambiar,ultimo_acceso,creado FROM usuarios ORDER BY usuario`)).rows
       .map(u => ({ id: u.id, usuario: u.usuario, rol: u.rol, doctorId: u.doctor_id, activo: u.activo, debeCambiar: u.debe_cambiar, ultimoAcceso: u.ultimo_acceso, creado: u.creado }));
@@ -125,6 +134,15 @@ app.put("/api/docs/:col/:id", auth, envolver(async (req, res) => {
   const data = await REGLAS[col](req.u, previo, req.body?.data || {}, id);
   await docPut(col, id, data);
   res.json({ data });
+  // avisos push (después de responder, sin hacer esperar al usuario)
+  if (!previo && col === "mensajes") {
+    const nombre = data.de === "admin" ? null : (await docGet("doctores", data.conv))?.nombre;
+    const aviso = { titulo: data.de === "admin" ? (data.aviso ? "Aviso de tu recepción" : "Nuevo mensaje de tu recepción") : `Mensaje de ${nombre || "un médico"}`, texto: (data.texto || "Cita compartida").slice(0, 120), vista: "mensajes", etiqueta: "msg-" + data.conv };
+    enviarPush(data.de === "admin" ? { doctorId: data.conv } : { rol: "admin" }, aviso);
+  }
+  if (!previo && col === "citas") enviarPush({ doctorId: data.doctorId }, { titulo: "Nueva cita agendada", texto: `${data.paciente?.nombre} · ${data.fecha.split("-").reverse().join("/")} ${hora12(data.hora)}`, vista: "agenda", etiqueta: "cita-" + id });
+  if (previo && col === "citas" && previo.estado !== "cancelada" && data.estado === "cancelada" && req.u.rol === "medico") enviarPush({ rol: "admin" }, { titulo: "Cita cancelada por el médico", texto: `${data.paciente?.nombre} · motivo: ${data.motivoCancelacion}`, vista: "panel" });
+  if (!previo && col === "solicitudes") enviarPush({ rol: "admin" }, { titulo: "Solicitud de cambio de plan", texto: "Un médico quiere cambiar de plan.", vista: "planes" });
 }));
 app.delete("/api/docs/:col/:id", auth, envolver(async (req, res) => {
   const { col, id } = req.params;
@@ -176,25 +194,93 @@ app.post("/api/verificar", auth, envolver(async (req, res) => {
   let folio = t.toUpperCase(), token = null, frag = null, datos = null;
   if (t.startsWith("EC1.")) { const [, cuerpo, f] = t.split("."); try { datos = JSON.parse(Buffer.from(cuerpo.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")); folio = datos.f; token = datos.t; frag = f; } catch { return res.json({ tipo: "bad", titulo: "Código no reconocido", texto: "Este QR no es un ticket de Enlace Clínico." }); } }
   else if (t.startsWith("ENLACE-CLINICO|")) [, folio, token, frag] = t.split("|");
-  const c = (await docsDe("citas", "folio", String(folio || "").toUpperCase()))[0];
+  let temporal = null;
+  if (/^T-[A-Z0-9]{6}$/i.test(folio || "")) {
+    temporal = (await q(`SELECT data FROM docs WHERE col='citas' AND data->'folioTemporal'->>'codigo'=$1`, [String(folio).toUpperCase()])).rows[0]?.data || null;
+    if (!temporal) return res.json({ tipo: "bad", titulo: "Folio temporal no encontrado", texto: "Revisa el código; los folios temporales empiezan con T-.", folio });
+    if (new Date(temporal.folioTemporal.expira) < new Date()) return res.json({ tipo: "bad", titulo: "Folio temporal vencido", texto: "Los folios temporales duran 1 hora. Pide a la recepción uno nuevo.", folio });
+  }
+  const c = temporal || (await docsDe("citas", "folio", String(folio || "").toUpperCase()))[0];
   await bitacora(req.u.usuario, "Verificación de ticket", folio);
   if (!c) return res.json({ tipo: "bad", titulo: "Ticket no encontrado", texto: "No hay ninguna cita con ese folio. Puede ser falso o haberse reagendado.", folio });
   if (req.u.rol !== "admin" && c.doctorId !== req.u.doctorId) return res.json({ tipo: "bad", titulo: "Ticket de otro consultorio", texto: "Este ticket no corresponde a tus citas.", folio });
   const doc = await docGet("doctores", c.doctorId);
-  const cita = { folio: c.folio, paciente: c.paciente?.nombre, medico: doc?.nombre, fecha: c.fecha, hora: c.hora, estado: c.estado };
+  const cita = { id: c.id, folio: c.folio, paciente: c.paciente?.nombre, medico: doc?.nombre, fecha: c.fecha, hora: c.hora, estado: c.estado, usado: !!c.usado, enConsulta: !!c.enConsulta };
+  if (c.usado && !c.enConsulta && c.estado !== "atendida") return res.json({ tipo: "bad", titulo: "Ticket ya utilizado", texto: "Este ticket ya se usó para pasar a consulta.", cita });
   if (!igualSeguro(firmar(c), c.firma || "")) return res.json({ tipo: "bad", titulo: "Ticket alterado", texto: "Los datos de esta cita ya no coinciden con su firma original.", cita });
-  if (token && (!igualSeguro(token, c.token) || !String(c.firma).startsWith(frag || "-"))) return res.json({ tipo: "bad", titulo: "Código no válido", texto: "El QR no corresponde a este folio; puede ser una copia modificada o un ticket anterior a un reagendado.", cita });
-  if (datos && (datos.p !== c.paciente?.nombre || datos.d !== c.fecha || datos.h !== c.hora)) return res.json({ tipo: "bad", titulo: "Datos alterados", texto: "El nombre, la fecha o la hora del QR no coinciden con la cita registrada.", cita });
+  if (!temporal && token && (!igualSeguro(token, c.token) || !String(c.firma).startsWith(frag || "-"))) return res.json({ tipo: "bad", titulo: "Código no válido", texto: "El QR no corresponde a este folio; puede ser una copia modificada o un ticket anterior a un reagendado.", cita });
+  if (!temporal && datos && (datos.p !== c.paciente?.nombre || datos.d !== c.fecha || datos.h !== c.hora)) return res.json({ tipo: "bad", titulo: "Datos alterados", texto: "El nombre, la fecha o la hora del QR no coinciden con la cita registrada.", cita });
   if (c.estado === "cancelada") return res.json({ tipo: "bad", titulo: "Cita cancelada", texto: "El ticket es auténtico, pero esta cita fue cancelada.", cita });
-  res.json({ tipo: "ok", titulo: c.estado === "atendida" ? "Ticket auténtico · ya atendida" : "Ticket auténtico", texto: token ? "La firma del código coincide con la cita registrada." : "Verificado por folio.", cita });
+  if (c.estado === "atendida") return res.json({ tipo: "bad", titulo: "Ticket ya utilizado", texto: "Esta cita ya fue atendida.", cita });
+  const vence = temporal ? new Date(temporal.folioTemporal.expira).toLocaleTimeString("es-MX", { timeZone: "America/Mexico_City", hour: "numeric", minute: "2-digit" }) : "";
+  res.json({ tipo: "ok", titulo: "Ticket auténtico", texto: temporal ? `Folio temporal válido hasta las ${vence}.` : token ? "La firma del código coincide con la cita registrada." : "Verificado por folio.", cita });
+}));
+
+/* ---------------- notificaciones push ---------------- */
+app.get("/api/push/clave", auth, (req, res) => res.json({ clave: clavePublica() }));
+app.post("/api/push/suscribir", auth, envolver(async (req, res) => {
+  const sub = req.body?.suscripcion;
+  if (!sub?.endpoint || !/^https:\/\//.test(sub.endpoint) || !sub.keys?.p256dh) return res.status(400).json({ error: "Suscripción no válida." });
+  await q(`INSERT INTO push_subs (endpoint, usuario_id, data) VALUES ($1,$2,$3) ON CONFLICT (endpoint) DO UPDATE SET usuario_id=EXCLUDED.usuario_id, data=EXCLUDED.data`, [sub.endpoint, req.u.id, sub]);
+  res.json({ ok: true });
+}));
+app.post("/api/push/baja", auth, envolver(async (req, res) => { await q(`DELETE FROM push_subs WHERE endpoint=$1 AND usuario_id=$2`, [String(req.body?.endpoint || ""), req.u.id]); res.json({ ok: true }); }));
+app.post("/api/push/prueba", auth, envolver(async (req, res) => { await enviarPush({ usuarioIds: [req.u.id] }, { titulo: "Notificaciones activadas", texto: "Así te avisaremos de citas y mensajes nuevos." }); res.json({ ok: true }); }));
+
+/* ---------------- consulta (solo el médico de la cita) ---------------- */
+app.post("/api/citas/:id/consulta", auth, envolver(async (req, res) => {
+  const c = await docGet("citas", req.params.id);
+  if (!c || req.u.rol !== "medico" || c.doctorId !== req.u.doctorId) return res.status(403).json({ error: "Esta cita no pertenece a tu consultorio." });
+  const accion = req.body?.accion;
+  if (accion === "iniciar") {
+    if (c.estado !== "confirmada") return res.status(409).json({ error: c.estado === "atendida" ? "Esta cita ya fue atendida." : "Esta cita está cancelada." });
+    if (c.usado && !c.enConsulta) return res.status(409).json({ error: "Este ticket ya fue utilizado." });
+    Object.assign(c, { usado: true, enConsulta: true, consultaInicio: c.consultaInicio || new Date().toISOString() });
+  } else if (accion === "finalizar") {
+    if (!c.enConsulta) return res.status(409).json({ error: "Primero pasa al paciente a consulta." });
+    const resumen = limpiarTexto(req.body?.resumen, 3000), receta = limpiarTexto(req.body?.receta, 3000);
+    if (resumen.length < 5) return res.status(400).json({ error: "Escribe el resumen de la consulta." });
+    Object.assign(c, { estado: "atendida", enConsulta: false, consulta: { resumen, receta, fecha: new Date().toISOString(), medico: req.u.usuario }, recetaPendiente: true });
+    enviarPush({ rol: "admin" }, { titulo: "Consulta terminada", texto: `Receta de ${c.paciente?.nombre} lista para enviar.`, vista: "panel" });
+  } else return res.status(400).json({ error: "Acción no válida." });
+  await docPut("citas", c.id, c);
+  await bitacora(req.u.usuario, accion === "iniciar" ? "Paciente pasó a consulta" : "Consulta finalizada", `${c.folio} · ${c.paciente?.nombre}`);
+  res.json({ data: c });
+}));
+
+/* ---------------- folio temporal (1 hora) ---------------- */
+app.post("/api/citas/:id/folio-temporal", auth, soloAdmin, envolver(async (req, res) => {
+  const c = await docGet("citas", req.params.id);
+  if (!c) return res.status(404).json({ error: "Cita no encontrada." });
+  if (c.estado !== "confirmada" || c.usado) return res.status(409).json({ error: "Solo se genera para citas confirmadas que aún no pasan a consulta." });
+  c.folioTemporal = { codigo: "T-" + aleatorio(6), expira: new Date(Date.now() + 3600_000).toISOString() };
+  await docPut("citas", c.id, c);
+  await bitacora(req.u.usuario, "Folio temporal generado", `${c.folio} -> ${c.folioTemporal.codigo}`);
+  res.json({ data: c });
+}));
+
+/* ---------------- sala de espera pública (sin login) ---------------- */
+const limiteSala = rateLimit({ windowMs: 60_000, limit: 40, standardHeaders: true, legacyHeaders: false });
+app.get("/api/sala/:doctorId", limiteSala, envolver(async (req, res) => {
+  const doc = await docGet("doctores", String(req.params.doctorId).slice(0, 40));
+  if (!doc) return res.status(404).json({ error: "Sala no encontrada." });
+  const citas = (await docsDe("citas", "doctorId", doc.id)).filter(c => c.fecha === hoy()).sort((a, b) => a.hora.localeCompare(b.hora));
+  const ini = n => String(n || "").split(/\s+/).filter(Boolean).slice(0, 3).map(x => x[0].toUpperCase() + ".").join("");
+  const turnos = citas.map((c, i) => ({ turno: String(i + 1).padStart(2, "0"), iniciales: ini(c.paciente?.nombre), hora: c.hora,
+    estado: c.estado === "cancelada" ? "cancelado" : c.estado === "atendida" ? "atendido" : c.enConsulta ? "consulta" : "espera" }));
+  res.set("Cache-Control", "no-store");
+  res.json({ medico: { nombre: doc.nombre, especialidad: doc.especialidad, consultorio: doc.consultorio, foto: doc.foto || null }, fecha: hoy(), turnos });
 }));
 
 /* ---------------- datos de prueba ---------------- */
-app.post("/api/demo/reset", auth, soloAdmin, envolver(async (req, res) => { await sembrar(req.u.usuario); res.json({ ok: true }); }));
+
 
 app.use((req, res) => res.status(404).json({ error: "No encontrado." }));
 
 const PUERTO = process.env.PORT || 4600;
 await crearEsquema();
 if (!(await q(`SELECT 1 FROM usuarios LIMIT 1`)).rowCount) { console.log("Base vacía: cargando datos de prueba"); await sembrar(); }
+if (!(await docGet("config", "general"))) await docPut("config", "general", { id: "general", banco: { banco: "BBVA México", titular: "Assistant Servicios de Recepción, S.A.S. de C.V.", clabe: "012180001234567891", cuenta: "0123456789", tarjeta: "4152 3138 0000 0000", concepto: "Mensualidad y tu nombre" } });
+await iniciarPush();
+iniciarAvisos();
 app.listen(PUERTO, () => console.log(`Enlace Clínico API en el puerto ${PUERTO}`));

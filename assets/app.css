@@ -763,3 +763,179 @@ input[type="number"]::-webkit-inner-spin-button,input[type="number"]::-webkit-ou
 .cargando-caja small{color:var(--ink-2);font-size:13px;line-height:1.45}
 @keyframes barrido{0%{transform:translateX(-100%)}100%{transform:translateX(260%)}}
 @media (prefers-reduced-motion:reduce){ .cargando-barra i{animation-duration:2.4s} .cargando-marca{animation:none} }
+
+/* =================== ASSISTANT: tema claro (blanco y negro, verde) / oscuro (negro y grises, azul) =================== */
+:root{
+  --bg:#F6F6F5; --surface:#FFFFFF; --surface-2:#F2F2F1; --line:#E3E3E1; --ink:#0B0B0B; --ink-2:#4A4A48; --ink-3:#85857F;
+  --accent:#0E8A5F; --accent-ink:#FFFFFF; --accent-soft:#E2F4EC;
+  --shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06);
+  --pick:#0E8A5F; --pick-soft:#E2F4EC; --pick-glow:rgba(14,138,95,.32); --go:#0E8A5F; --go-soft:#E2F4EC; --go-glow:rgba(14,138,95,.35);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0A0A0A; --surface:#141414; --surface-2:#1C1C1C; --line:#2A2A2A; --ink:#F2F2F2; --ink-2:#B0B0B0; --ink-3:#7C7C7C;
+  --accent:#3B82F6; --accent-ink:#FFFFFF; --accent-soft:#16233D;
+  --ok:#4ADE80; --ok-soft:#12291A; --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px rgba(0,0,0,.35);
+  --pick:#3B82F6; --pick-soft:#16233D; --pick-glow:rgba(59,130,246,.4); --go:#3B82F6; --go-ink:#DBEAFE; --go-soft:#16233D; --go-glow:rgba(59,130,246,.4); color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0A0A0A; --surface:#141414; --surface-2:#1C1C1C; --line:#2A2A2A; --ink:#F2F2F2; --ink-2:#B0B0B0; --ink-3:#7C7C7C;
+  --accent:#3B82F6; --accent-ink:#FFFFFF; --accent-soft:#16233D;
+  --ok:#4ADE80; --ok-soft:#12291A; --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px rgba(0,0,0,.35);
+  --pick:#3B82F6; --pick-soft:#16233D; --pick-glow:rgba(59,130,246,.4); --go:#3B82F6; --go-ink:#DBEAFE; --go-soft:#16233D; --go-glow:rgba(59,130,246,.4); color-scheme:dark }
+:root[data-theme="light"]{ color-scheme:light }
+
+/* logo según tema */
+.solo-oscuro{display:none!important}
+:root[data-theme="dark"] .solo-oscuro{display:block!important}
+:root[data-theme="dark"] .solo-claro{display:none!important}
+.logo-a{width:34px;height:34px;display:grid;place-items:center;flex:none}
+.logo-a img{width:100%;height:100%;object-fit:contain}
+.brand .marca-txt{letter-spacing:.14em;font-size:16px}
+.acc-logo{display:flex;justify-content:center;margin-bottom:6px}
+.logo-completo img{width:min(230px,70vw);height:auto}
+.acc-top-der,.topbar-der{display:inline-flex;align-items:center;gap:12px;margin-left:auto}
+.tema-fila{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 8px;font-size:13px;font-weight:600;color:var(--ink-2)}
+.chat-logo .logo-a{width:28px;height:28px}
+.pass-logo{width:22px;height:22px;object-fit:contain}
+.pass-brand{color:#0B0B0B;letter-spacing:.12em}
+
+/* interruptor sol / luna */
+.tema-switch{position:relative;width:62px;height:32px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:space-between;flex:none;transition:background .25s,border-color .25s}
+.tema-switch .ts-ico{width:30px;height:30px;display:grid;place-items:center;color:var(--ink-3);position:relative;z-index:1;transition:color .25s}
+.tema-switch .ts-ico svg{width:15px;height:15px}
+.tema-switch .ts-perilla{position:absolute;top:2px;left:2px;width:26px;height:26px;border-radius:50%;background:#FFFFFF;box-shadow:0 2px 6px rgba(0,0,0,.2);transition:transform .3s cubic-bezier(.3,1.4,.5,1),background .25s}
+.tema-switch .sol{color:#B45309}
+.tema-switch[aria-checked="true"]{background:#1E293B;border-color:#334155}
+.tema-switch[aria-checked="true"] .ts-perilla{transform:translateX(30px);background:#3B82F6}
+.tema-switch[aria-checked="true"] .luna{color:#FFFFFF}
+.tema-switch[aria-checked="true"] .sol{color:#64748B}
+@media (prefers-reduced-motion:reduce){.tema-switch .ts-perilla{transition:none}}
+
+/* lupa en buscadores */
+input[type="search"].input{padding-left:38px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2385857F' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:12px 50%;background-size:17px}
+
+/* selecciones más claras */
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);box-shadow:0 4px 12px var(--pick-glow)}
+.pick button[aria-pressed="true"]{box-shadow:0 0 0 3px var(--pick-soft),0 6px 16px var(--pick-glow);transform:translateY(-1px);font-weight:700}
+.docpick button{position:relative;transition:border-color .15s,box-shadow .15s,transform .15s}
+.docpick button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent),0 8px 20px var(--pick-glow);transform:translateY(-1px)}
+.docpick button[aria-pressed="true"]::after{content:"";position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center/13px no-repeat;box-shadow:0 0 0 3px var(--surface)}
+
+/* ticket: talón negro, letras grandes */
+.pass-stub{background:#0B0B0B;color:#FFFFFF;padding:24px 18px}
+.pass-stub::before{border-left-color:rgba(255,255,255,.35)}
+.pass-stub small{font-size:12.5px;opacity:.9}
+.pass-stub b,.pass-stub .mono{font-size:15px;letter-spacing:.04em}
+.pass-stub canvas,.pass-stub img{background:#FFFFFF;border-radius:10px;padding:6px}
+@media (max-width:640px){ .pass-stub::before{border-top-color:rgba(255,255,255,.35)} }
+.pass{font-size:15.5px}
+.folio-temp{display:flex;align-items:center;gap:10px;margin-top:14px;padding:12px 14px;border-radius:12px;background:#0B0B0B;color:#FFFFFF;flex-wrap:wrap}
+.folio-temp svg{width:18px;height:18px}
+.folio-temp b{font-size:17px;letter-spacing:.08em}
+.folio-temp span{flex:1;min-width:0}
+.folio-temp .btn{background:#FFFFFF;color:#0B0B0B;border-color:#FFFFFF}
+
+/* verificación elegante */
+.vcard{border-radius:18px;border:1px solid var(--line);background:var(--surface);overflow:hidden;box-shadow:var(--shadow)}
+.vcard header{display:flex;gap:16px;align-items:center;padding:22px;position:relative}
+.vcard.ok header{background:linear-gradient(135deg,var(--ok-soft),transparent 75%)}
+.vcard.bad header{background:linear-gradient(135deg,var(--bad-soft),transparent 75%)}
+.vcard-ico{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;flex:none;color:#fff}
+.vcard.ok .vcard-ico{background:var(--ok);box-shadow:0 10px 24px color-mix(in srgb,var(--ok) 40%,transparent)}
+.vcard.bad .vcard-ico{background:var(--bad)}
+.vcard.info .vcard-ico{background:var(--ink-2)}
+.vcard header b{font-family:var(--f-display);font-size:21px;display:block}
+.vcard header p{margin:3px 0 0;color:var(--ink-2)}
+.vcard-datos{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);margin:0;border-top:1px solid var(--line)}
+.vcard-datos div{background:var(--surface);padding:12px 18px}
+.vcard-datos dt{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+.vcard-datos dd{margin:2px 0 0;font-weight:600}
+.verif-opciones{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.verif-opciones .btn{flex:1 1 180px;padding:14px 16px}
+
+/* ventanas flotantes centradas (también en celular) */
+@media (max-width:760px){
+  .overlay:has(.flotante){place-items:center;padding:16px}
+  .modal.flotante{border-radius:20px;max-height:calc(100dvh - 32px)}
+}
+.exito-b,.pago-b{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:30px 24px 14px}
+.exito-b p,.pago-b p{margin:0;color:var(--ink-2)}
+.exito-ico{width:72px;height:72px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;box-shadow:0 0 0 10px var(--accent-soft);animation:pop .45s cubic-bezier(.3,1.5,.5,1)}
+.exito-ico svg{width:36px;height:36px}
+.folio-grande{font-size:20px;font-weight:700;letter-spacing:.08em;padding:8px 14px;border-radius:10px;background:var(--surface-2);border:1px dashed var(--line)}
+.pago-ico{width:66px;height:66px;border-radius:20px;background:var(--bad-soft);color:var(--bad);display:grid;place-items:center}
+.pago-ico svg{width:30px;height:30px}
+.pago-b .tarjeta-banco{width:100%;text-align:left;margin:6px 0}
+@keyframes pop{from{transform:scale(.4);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.exito-ico{animation:none}}
+
+/* citas en tarjetas */
+.cita-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.cita-card{display:flex;flex-direction:column;gap:8px;text-align:left;padding:16px;border-radius:16px;border:1px solid var(--line);background:var(--surface);cursor:pointer;box-shadow:var(--shadow);transition:transform .15s,border-color .15s;min-width:0}
+.cita-card:hover{transform:translateY(-2px);border-color:var(--accent)}
+.cita-card.estado-cancelada{opacity:.75}
+.cc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.cc-hora b{font-family:var(--f-display);font-size:22px;display:block;line-height:1}
+.cc-hora small,.cc-motivo,.cc-doc small{color:var(--ink-3);font-size:12.5px}
+.cc-paciente{font-size:16px;overflow-wrap:anywhere}
+.cc-doc{display:flex;gap:10px;align-items:center;padding-top:10px;border-top:1px solid var(--line);min-width:0}
+.cc-doc .avatar{width:32px;height:32px;border-radius:9px;font-size:12px;flex:none}
+.cc-doc b{display:block;font-size:13.5px}
+.cc-pie{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--ink-3)}
+
+/* insignias de plan */
+.insignia-plan{display:inline-flex;align-items:center;gap:5px;padding:3px 10px 3px 6px;border-radius:999px;background:var(--fondo);color:#111;font-size:11.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle;box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 2px 6px rgba(0,0,0,.15);white-space:nowrap}
+.insignia-plan svg{width:13px;height:13px}
+.insignia-plan.grande{font-size:13px;padding:6px 14px 6px 9px}
+.insignia-plan.grande svg{width:17px;height:17px}
+.miplan-tit{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h2 .insignia-plan{margin-left:6px;font-family:var(--f-body)}
+
+/* certificados como insignias */
+.insignias{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.insignias li{position:relative}
+.insignia-cert{width:100%;display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;padding:18px 12px 14px;border-radius:16px;border:1px solid var(--line);background:linear-gradient(180deg,color-mix(in srgb,var(--tono) 12%,var(--surface)),var(--surface));cursor:pointer;transition:transform .15s,box-shadow .15s}
+.insignia-cert:hover{transform:translateY(-2px);box-shadow:0 10px 24px color-mix(in srgb,var(--tono) 25%,transparent)}
+.medalla{width:52px;height:52px;color:var(--tono);margin-bottom:4px}
+.medalla svg{width:100%;height:100%}
+.insignia-cert b{font-size:13.5px;line-height:1.25}
+.insignia-cert small{font-size:11.5px;color:var(--ink-3)}
+.insignia-cert em{font-style:normal;font-size:11px;font-weight:700;color:var(--tono);margin-top:4px}
+.quitar-cert{position:absolute;top:6px;right:6px;width:26px;height:26px}
+
+/* consulta */
+.modal.consulta{width:min(780px,100%)}
+.paciente-ficha{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;align-items:center;padding:16px;border-radius:14px;background:var(--surface-2);border:1px solid var(--line)}
+.pf-av{width:48px;height:48px;border-radius:14px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:800;font-family:var(--f-display)}
+.paciente-ficha b{font-size:17px;display:block}
+.paciente-ficha small{color:var(--ink-3)}
+.paciente-ficha dl{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:8px 0 0}
+.paciente-ficha dt{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3)}
+.paciente-ficha dd{margin:0;font-weight:600}
+.nota-recep{margin:0;padding:10px 14px;border-radius:10px;background:var(--warn-soft);font-size:14px}
+.mono-suave{font-family:var(--f-mono);font-size:14px}
+.texto-largo{white-space:pre-wrap;margin:0 0 14px;line-height:1.6}
+.texto-largo.receta{font-family:var(--f-mono);font-size:14px;padding:14px;border-radius:12px;background:var(--surface-2)}
+h3.sub{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+
+/* tarjeta bancaria */
+.banco{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,380px);gap:24px;align-items:center}
+.banco-txt h2{font-size:20px}
+.banco-txt p{color:var(--ink-2)}
+.banco-acc{display:flex;gap:8px;flex-wrap:wrap}
+@media (max-width:760px){.banco{grid-template-columns:1fr}}
+.tarjeta-banco{position:relative;aspect-ratio:1.586;max-width:100%;border-radius:20px;padding:22px;color:#FFFFFF;background:radial-gradient(120% 140% at 100% 0%,#2B2B2B 0%,#0B0B0B 55%),#0B0B0B;box-shadow:0 22px 50px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.12);display:flex;flex-direction:column;justify-content:space-between;gap:8px;overflow:hidden}
+.tarjeta-banco::before{content:"";position:absolute;inset:-40% -30% auto auto;width:70%;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--accent) 55%,transparent),transparent 70%);opacity:.55}
+.tarjeta-banco>*{position:relative}
+.tb-top{display:flex;justify-content:space-between;align-items:center}
+.tb-top b{font-family:var(--f-display);font-size:19px;letter-spacing:.06em}
+.tb-chip{width:40px;height:30px;border-radius:7px;background:linear-gradient(135deg,#F2D27A,#B88A2E)}
+.tarjeta-banco small{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;opacity:.65}
+.tb-clabe b{font-size:clamp(15px,4.4vw,19px);letter-spacing:.06em}
+.tb-fila{display:flex;gap:18px;flex-wrap:wrap}
+.tb-fila b{font-size:13.5px}
+.tb-concepto{font-size:11.5px;opacity:.75}
+.tb-logo{position:absolute!important;right:20px;bottom:18px;width:28px;opacity:.85}
+
+.notif-btn{width:100%;justify-content:flex-start}
+.notif-btn.activo{color:var(--ok)}
+.notif-btn.denegado{color:var(--ink-3)}
