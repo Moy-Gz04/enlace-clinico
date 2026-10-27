@@ -991,6 +991,39 @@ function insigniaPlan(id, tam=""){
   return `<span class="insignia-plan ${tam}" style="--fondo:${c.css}" title="Plan ${esc(p?.nombre||"")}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 15.4 6.8 18.1l1-5.8L3.5 8.2l5.9-.9z" fill="currentColor"/></svg><span>${esc(p?.nombre||"")}</span></span>`;
 }
 const TONOS_CERT = ["#0B7A63","#2563EB","#9333EA","#C2410C","#0E7490","#B45309"];
+/* Miniatura de la 1.ª página de los certificados en PDF (pdf.js local, se carga solo si hace falta) */
+const MINIS_PDF = new Map();
+let pdfjsListo = null;
+function cargarPdfjs(){
+  if(pdfjsListo) return pdfjsListo;
+  pdfjsListo = new Promise((ok,mal)=>{ const sc=document.createElement("script"); sc.src="assets/vendor/pdf.min.js"; sc.onload=()=>{ window.pdfjsLib.GlobalWorkerOptions.workerSrc="assets/vendor/pdf.worker.min.js"; ok(window.pdfjsLib); }; sc.onerror=mal; document.head.appendChild(sc); });
+  return pdfjsListo;
+}
+async function miniaturasPdf(x){
+  const pend = [...document.querySelectorAll("[data-pdf-cert]")];
+  if(!pend.length) return;
+  try{
+    const lib = await cargarPdfjs();
+    for(const el of pend){
+      const c = (x.certificados||[]).find(o=>o.id===el.dataset.pdfCert); if(!c?.data) continue;
+      const bin = atob(c.data.split(",")[1]||""); const bytes = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+      const doc = await lib.getDocument({data:bytes, isEvalSupported:false}).promise;
+      const pag = await doc.getPage(1); const vp0 = pag.getViewport({scale:1}); const vp = pag.getViewport({scale:240/Math.min(vp0.width,vp0.height)});
+      const cv = document.createElement("canvas"); cv.width=vp.width; cv.height=vp.height;
+      await pag.render({canvasContext:cv.getContext("2d"), viewport:vp}).promise;
+      const url = cv.toDataURL("image/jpeg",.85); MINIS_PDF.set(c.id, url); doc.destroy();
+      if(el.isConnected){ const img=document.createElement("img"); img.src=url; img.alt=""; el.replaceWith(img); }
+    }
+  }catch(e){ console.warn("No se pudo generar la miniatura del PDF", e); }
+}
+/* Insignia del certificado: la imagen real dentro de una medalla; los PDF llevan el ícono */
+function medallon(c){
+  const mini = MINIS_PDF.get(c.id);
+  const dentro = c.tipo==="img" && c.data ? `<img src="${esc(c.data)}" alt="" loading="lazy">`
+    : mini ? `<img src="${mini}" alt="">`
+    : `<span class="medallon-pdf" data-pdf-cert="${esc(c.id)}">${ICON.pdf}<small>PDF</small></span>`;
+  return `<span class="medallon" aria-hidden="true"><span class="medallon-cintas"></span><span class="medallon-aro">${dentro}</span><span class="medallon-check">${ICON.verificar}</span></span>`;
+}
 const MEDALLA = `<span class="medalla" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M16 4h16l-3 14H19z" fill="currentColor" opacity=".55"/><circle cx="24" cy="29" r="13" fill="currentColor"/><circle cx="24" cy="29" r="9.5" fill="none" stroke="#fff" stroke-width="1.6" opacity=".7"/><path d="M19 29.5l3.4 3.4 6.6-7" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
 
 /* ================= citas en tarjetas (admin) ================= */
@@ -1367,18 +1400,26 @@ function vistaPerfil(x, propio){
     <div class="perfil-cuerpo">
       <div class="perfil-id">
         <div class="perfil-foto">${avatarDe(x,"perfil-av")}${propio?`<label class="perfil-foto-btn" for="pfFoto" aria-label="Cambiar foto de perfil">${ICON.camara}<input type="file" id="pfFoto" accept="image/jpeg,image/png,image/webp" hidden></label>`:""}</div>
-        <div class="perfil-nombre"><h2>${esc(x.nombre)} ${insigniaPlan(pr.id)}</h2><p>${esc(x.especialidad)}${x.cedula?` · Cédula profesional ${esc(x.cedula)}`:""}</p>
-          <div class="perfil-chips">${(x.servicios||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div></div>
+        <div class="perfil-nombre"><h2>${esc(x.nombre)}</h2>
+          <p class="perfil-esp">${esc(x.especialidad)}</p>
+          <div class="perfil-sellos">${insigniaPlan(pr.id)}${x.cedula?`<span class="sello-cedula">${ICON.verificar}<span><small>Cédula profesional</small><b class="num">${esc(x.cedula)}</b></span></span>`:""}${certs.length?`<span class="sello-certs">${certs.length} ${certs.length===1?"certificado":"certificados"}</span>`:""}</div></div>
       </div>
+      ${(x.servicios||[]).length?`<div class="perfil-chips">${x.servicios.map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div>`:""}
       <div class="perfil-grid">
         <section class="perfil-sobre">
           <h3>Sobre ${propio?"mí":esc(x.nombre.split(" ").slice(0,2).join(" "))}</h3>
           ${x.descripcion?`<p class="perfil-desc">${esc(x.descripcion)}</p>`:`<p class="note">${propio?"Aún no escribes tu descripción. Cuéntale a tus pacientes tu experiencia y cómo atiendes.":"El médico aún no agrega su descripción."}</p>`}
           <h3>Certificados y cédulas</h3>
-          ${certs.length?`<ul class="insignias">${certs.map((c,i)=>`<li><button type="button" class="insignia-cert" data-cert="${esc(c.id)}" data-doc="${esc(x.id)}" style="--tono:${TONOS_CERT[i%TONOS_CERT.length]}">${MEDALLA}<b>${esc(c.nombre)}</b><small>${esc([c.institucion,c.anio].filter(Boolean).join(" · "))}</small><em>${c.tipo==="pdf"?"Ver PDF":"Ver certificado"}</em></button>${propio?`<button type="button" class="x quitar-cert" data-cert-quitar="${esc(c.id)}" aria-label="Quitar ${esc(c.nombre)}">${ICON.cerrar}</button>`:""}</li>`).join("")}</ul>`:`<p class="note">${propio?"Agrega tus títulos, cédulas o diplomados para dar más confianza.":"Sin certificados adjuntos."}</p>`}
+          ${certs.length?`<ul class="insignias">${certs.map((c,i)=>`<li><button type="button" class="insignia-cert" data-cert="${esc(c.id)}" data-doc="${esc(x.id)}" style="--tono:${TONOS_CERT[i%TONOS_CERT.length]}">${medallon(c)}<b>${esc(c.nombre)}</b><small>${esc([c.institucion,c.anio].filter(Boolean).join(" · ")||" ")}</small><em>${c.tipo==="pdf"?"Ver PDF":"Ver documento"}</em></button>${propio?`<button type="button" class="x quitar-cert" data-cert-quitar="${esc(c.id)}" aria-label="Quitar ${esc(c.nombre)}">${ICON.cerrar}</button>`:""}</li>`).join("")}</ul>`:`<p class="note">${propio?"Agrega tus títulos, cédulas o diplomados para dar más confianza.":"Sin certificados adjuntos."}</p>`}
         </section>
         <aside class="perfil-datos">
-          <dl class="kv"><dt>Consultorio</dt><dd>${esc(x.consultorio)}</dd><dt>Dirección</dt><dd>${esc(x.direccion||"—")}</dd><dt>Teléfono</dt><dd class="num">${esc(x.telefono||"—")}</dd><dt>Horario</dt><dd>${esc(textoHorario(x))}</dd><dt>Consulta</dt><dd>${x.costoConsulta?dinero(x.costoConsulta):"—"}</dd>${!propio?`<dt>Plan</dt><dd>${esc(pr.nombre)}</dd>`:""}</dl>
+          <div class="perfil-costo"><small>Consulta</small><b class="num">${x.costoConsulta?dinero(x.costoConsulta):"—"}</b></div>
+          <dl class="perfil-info">
+            <div><dt>${ICON.sala}Consultorio</dt><dd>${esc(x.consultorio||"—")}${x.direccion?`<small>${esc(x.direccion)}</small>`:""}</dd></div>
+            <div><dt>${ICON.reloj}Horario</dt><dd>${esc(textoHorario(x))}</dd></div>
+            <div><dt>${ICON.mensajes}Teléfono</dt><dd class="num">${esc(x.telefono||"—")}</dd></div>
+            ${!propio?`<div><dt>${ICON.planes}Plan</dt><dd>${esc(pr.nombre)}</dd></div>`:""}
+          </dl>
         </aside>
       </div>
     </div>
@@ -1407,6 +1448,7 @@ function enlazarPerfil(){
   v.querySelectorAll("[data-ver-perfil]").forEach(b=>b.addEventListener("click",()=>{ S.perfilDe=b.dataset.verPerfil; S.vista="perfil"; render(); window.scrollTo({top:0}); }));
   v.querySelectorAll("[data-ficha]").forEach(b=>b.addEventListener("click",()=>descargarFicha(docById(b.dataset.doc), b.dataset.ficha)));
   v.querySelectorAll("[data-cert]").forEach(b=>b.addEventListener("click",()=>verCertificado(docById(b.dataset.doc), b.dataset.cert)));
+  const fich = v.querySelector("[data-cert]"); if(fich) miniaturasPdf(docById(fich.dataset.doc));
   const me = miDoctor(); if(!me || !$("#fPerfil")) return;
   const guardarImg = async (input, campo, fn) => { const f=input.files?.[0]; if(!f) return; try{ exigir("medico", me.id); const data = await fn(f); me[campo]=data; bitacora(campo==="foto"?"Foto de perfil actualizada":"Banner actualizado", me.nombre); if(Store.guardar()){ render(); toast("Imagen actualizada"); } }catch(e){ toast(e.message||"No se pudo cargar la imagen."); } };
   $("#pfFoto")?.addEventListener("change",e=>guardarImg(e.target,"foto",f=>recortarCuadrado(f,360)));

@@ -1,0 +1,151 @@
+/* =================== LIQUID GLASS 3D ===================
+   Capa visual que va después de app.css: superficies translúcidas con
+   desenfoque, brillo en el borde superior y sombra de volumen.
+   Un solo tamaño de botón: 42 px (36 px dentro de tarjetas). */
+:root{
+  --glass:rgba(255,255,255,.62); --glass-2:rgba(255,255,255,.38); --glass-brd:rgba(255,255,255,.85);
+  --glass-hi:rgba(255,255,255,.95); --glass-sombra:rgba(15,23,20,.16); --glass-lineal:rgba(0,0,0,.07);
+  --amb-1:rgba(14,138,95,.13); --amb-2:rgba(120,120,120,.10);
+  --btn-h:42px; --btn-h-sm:36px; --r-btn:14px; --r-card:22px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --glass:rgba(38,38,42,.55); --glass-2:rgba(30,30,34,.35); --glass-brd:rgba(255,255,255,.12);
+  --glass-hi:rgba(255,255,255,.18); --glass-sombra:rgba(0,0,0,.55); --glass-lineal:rgba(255,255,255,.06);
+  --amb-1:rgba(59,130,246,.16); --amb-2:rgba(148,163,184,.08) }}
+:root[data-theme="dark"]{
+  --glass:rgba(38,38,42,.55); --glass-2:rgba(30,30,34,.35); --glass-brd:rgba(255,255,255,.12);
+  --glass-hi:rgba(255,255,255,.18); --glass-sombra:rgba(0,0,0,.55); --glass-lineal:rgba(255,255,255,.06);
+  --amb-1:rgba(59,130,246,.16); --amb-2:rgba(148,163,184,.08) }
+
+/* luz ambiente detrás del vidrio */
+body{background:
+  radial-gradient(60vw 50vh at 85% -5%,var(--amb-1),transparent 70%),
+  radial-gradient(50vw 45vh at -5% 105%,var(--amb-2),transparent 70%),
+  var(--bg);background-attachment:fixed}
+
+/* superficies: paneles, tarjetas y ventanas */
+.panel,.cita-card,.plancard,.vcard,.modal,.perfil-datos,.paciente-ficha{
+  background:linear-gradient(160deg,var(--glass),var(--glass-2));
+  -webkit-backdrop-filter:blur(22px) saturate(1.7);backdrop-filter:blur(22px) saturate(1.7);
+  border:1px solid var(--glass-brd);border-radius:var(--r-card);
+  box-shadow:inset 0 1px 0 var(--glass-hi),inset 0 -1px 0 var(--glass-lineal),0 1px 2px var(--glass-lineal),0 18px 40px -18px var(--glass-sombra)}
+.panel-h,.modal-h,.modal-f{border-color:var(--glass-lineal)}
+.modal{border-radius:26px;background:linear-gradient(160deg,color-mix(in srgb,var(--surface) 82%,transparent),color-mix(in srgb,var(--surface) 70%,transparent));box-shadow:inset 0 1px 0 var(--glass-hi),0 40px 90px -20px rgba(0,0,0,.45)}
+.modal-h{padding:18px 22px}
+.modal-b{padding:22px}
+.modal-f{padding:16px 22px;gap:10px}
+.overlay{background:rgba(10,14,13,.32);-webkit-backdrop-filter:blur(10px) saturate(1.2);backdrop-filter:blur(10px) saturate(1.2)}
+.cita-card:hover,.insignia-cert:hover{transform:translateY(-3px);box-shadow:inset 0 1px 0 var(--glass-hi),0 26px 46px -18px var(--glass-sombra)}
+
+/* botones */
+.btn{height:var(--btn-h);min-width:120px;padding:0 18px;border-radius:var(--r-btn);font-size:14px;font-weight:650;color:var(--ink);
+  background:linear-gradient(180deg,var(--glass-hi),var(--glass) 55%,var(--glass-2));
+  -webkit-backdrop-filter:blur(14px) saturate(1.8);backdrop-filter:blur(14px) saturate(1.8);
+  border:1px solid var(--glass-brd);
+  box-shadow:inset 0 1px 0 var(--glass-hi),inset 0 -2px 4px var(--glass-lineal),0 1px 1px var(--glass-lineal),0 8px 18px -10px var(--glass-sombra);
+  transition:transform .16s cubic-bezier(.3,1.4,.5,1),box-shadow .2s,filter .2s}
+.btn:hover{border-color:var(--glass-brd);transform:translateY(-1px);box-shadow:inset 0 1px 0 var(--glass-hi),inset 0 -2px 4px var(--glass-lineal),0 14px 24px -12px var(--glass-sombra)}
+.btn:active{transform:translateY(1px) scale(.98);box-shadow:inset 0 2px 6px var(--glass-sombra)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn-primary{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 70%,#fff);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 62%,#fff) 0%,var(--accent) 48%,color-mix(in srgb,var(--accent) 82%,#000) 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -3px 6px rgba(0,0,0,.18),0 10px 22px -10px color-mix(in srgb,var(--accent) 75%,transparent)}
+.btn-primary:hover{filter:brightness(1.05);border-color:color-mix(in srgb,var(--accent) 70%,#fff);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -3px 6px rgba(0,0,0,.18),0 16px 28px -12px color-mix(in srgb,var(--accent) 80%,transparent)}
+.btn-danger{color:var(--bad)}
+.btn-sm{height:var(--btn-h-sm);min-width:0;padding:0 14px;font-size:13px;border-radius:12px}
+.btn svg{width:17px;height:17px;flex:none}
+.x{width:36px;height:36px;border-radius:50%;background:linear-gradient(180deg,var(--glass-hi),var(--glass-2));border:1px solid var(--glass-brd);box-shadow:inset 0 1px 0 var(--glass-hi),0 4px 10px -6px var(--glass-sombra)}
+
+/* grupos de botones parejos */
+.head>div:last-child:has(.btn){display:flex;gap:10px;flex-wrap:wrap}
+.doc-foot{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding-top:8px}
+.doc-foot .btn{width:100%}
+.modal-f .btn{min-width:140px}
+@media (max-width:560px){
+  .head>div:last-child:has(.btn){width:100%}
+  .head>div:last-child:has(.btn) .btn{flex:1 1 140px}
+  .modal-f .btn{flex:1 1 130px;min-width:0}
+}
+
+/* campos y buscador */
+.input,select.input,textarea.input{min-height:var(--btn-h);border-radius:var(--r-btn);border:1px solid var(--glass-brd);
+  background-color:var(--glass);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  box-shadow:inset 0 2px 4px var(--glass-lineal),inset 0 -1px 0 var(--glass-hi);transition:border-color .2s,box-shadow .2s}
+.input:focus{border-color:var(--accent);box-shadow:inset 0 2px 4px var(--glass-lineal),0 0 0 4px var(--accent-soft)}
+input[type="search"].input{height:var(--btn-h);border-radius:999px;padding-left:42px;background-position:15px 50%}
+input[type="file"].input{padding:8px 12px}
+
+/* ===== perfil profesional ===== */
+.perfil{padding:0;overflow:hidden}
+.perfil-banner{height:clamp(150px,22vw,230px);background-size:cover;background-position:center}
+.perfil-banner::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 55%,rgba(0,0,0,.18));pointer-events:none}
+.perfil-cuerpo{gap:22px;padding:0 clamp(18px,3vw,34px) 30px}
+.perfil-id{align-items:flex-end;gap:22px;margin-top:-62px;position:relative;z-index:1}
+.perfil-av{width:132px;height:132px;border-radius:32px;border:4px solid var(--surface);box-shadow:0 18px 36px -14px rgba(0,0,0,.45)}
+.perfil-nombre{padding:70px 0 4px;gap:6px}
+.perfil-nombre h2{font-size:clamp(24px,3vw,30px);font-weight:800;line-height:1.1;letter-spacing:-.01em}
+.perfil-esp{margin:0;font-size:16px;font-weight:600;color:var(--accent)!important}
+.perfil-sellos{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:4px}
+.sello-cedula{display:inline-flex;align-items:center;gap:9px;height:42px;padding:0 16px 0 11px;border-radius:999px;
+  background:linear-gradient(180deg,var(--glass-hi),var(--glass));border:1px solid var(--glass-brd);box-shadow:inset 0 1px 0 var(--glass-hi),0 8px 18px -10px var(--glass-sombra)}
+.sello-cedula>svg{width:22px;height:22px;color:var(--accent)}
+.sello-cedula small{display:block;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);line-height:1.1}
+.sello-cedula b{display:block;font-size:14px;letter-spacing:.04em;line-height:1.15}
+.sello-certs{display:inline-flex;align-items:center;height:30px;padding:0 13px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:12.5px;font-weight:700}
+.perfil-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0}
+.perfil-grid{grid-template-columns:minmax(0,1.65fr) minmax(260px,1fr);gap:30px}
+.perfil-sobre{gap:14px}
+.perfil-sobre h3{font-size:12.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);margin-top:8px}
+.perfil-datos{padding:0;overflow:hidden;align-self:start}
+.perfil-costo{padding:18px 20px;border-bottom:1px solid var(--glass-lineal);background:linear-gradient(135deg,var(--accent-soft),transparent)}
+.perfil-costo small{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.perfil-costo b{font-family:var(--f-display);font-size:30px;font-weight:800;line-height:1.1}
+.perfil-info{margin:0;padding:4px 20px 10px}
+.perfil-info>div{padding:12px 0;border-bottom:1px solid var(--glass-lineal)}
+.perfil-info>div:last-child{border-bottom:0}
+.perfil-info dt{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+.perfil-info dt svg{width:15px;height:15px}
+.perfil-info dd{margin:4px 0 0;font-weight:600;line-height:1.4}
+.perfil-info dd small{display:block;font-weight:400;color:var(--ink-2)}
+@media (max-width:820px){
+  .perfil-grid{grid-template-columns:1fr}
+  .perfil-id{flex-direction:column;align-items:flex-start;gap:14px}
+  .perfil-nombre{padding-top:0}
+}
+
+/* certificados: la imagen real como medalla */
+.insignias{grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:14px}
+.insignias li{display:flex}
+.insignia-cert{gap:6px;padding:20px 14px 16px;border-radius:20px;border:1px solid var(--glass-brd);
+  background:linear-gradient(170deg,color-mix(in srgb,var(--tono) 14%,var(--glass)),var(--glass-2));
+  -webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
+  box-shadow:inset 0 1px 0 var(--glass-hi),0 14px 30px -18px var(--glass-sombra)}
+.medallon{position:relative;width:104px;height:120px;margin-bottom:6px;display:block;flex:none}
+.medallon-cintas{position:absolute;left:50%;bottom:0;width:60px;height:46px;transform:translateX(-50%)}
+.medallon-cintas::before,.medallon-cintas::after{content:"";position:absolute;bottom:0;width:24px;height:46px;background:linear-gradient(180deg,var(--tono),color-mix(in srgb,var(--tono) 60%,#000));clip-path:polygon(0 0,100% 0,100% 100%,50% 80%,0 100%)}
+.medallon-cintas::before{left:2px;transform:rotate(14deg)}
+.medallon-cintas::after{right:2px;transform:rotate(-14deg)}
+.medallon-aro{position:absolute;left:0;top:0;width:104px;height:104px;border-radius:50%;padding:7px;
+  background:conic-gradient(from 200deg,color-mix(in srgb,var(--tono) 50%,#fff),var(--tono),color-mix(in srgb,var(--tono) 55%,#000),var(--tono),color-mix(in srgb,var(--tono) 50%,#fff));
+  box-shadow:0 12px 24px -10px color-mix(in srgb,var(--tono) 70%,transparent),inset 0 2px 2px rgba(255,255,255,.5)}
+.medallon-aro img,.medallon-pdf{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;border:3px solid rgba(255,255,255,.92);background:#fff}
+.medallon-aro::after{content:"";position:absolute;inset:7px;border-radius:50%;background:linear-gradient(160deg,rgba(255,255,255,.5),transparent 45%);pointer-events:none}
+.medallon-pdf{display:grid;place-content:center;justify-items:center;gap:2px;color:var(--tono)}
+.medallon-pdf svg{width:30px;height:30px}
+.medallon-pdf small{font-size:11px;font-weight:800;letter-spacing:.1em}
+.medallon-check{position:absolute;right:0;top:72px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--tono);color:#fff;border:3px solid var(--surface);box-shadow:0 4px 10px rgba(0,0,0,.2)}
+.medallon-check svg{width:15px;height:15px}
+.insignia-cert b{font-size:14px;line-height:1.25}
+.insignia-cert em{margin-top:auto;padding-top:6px}
+.quitar-cert{top:8px;right:8px;width:30px;height:30px}
+
+@media (prefers-reduced-motion:reduce){ .btn,.cita-card,.insignia-cert{transition:none} }
+
+/* tarjeta de médico: insignia y precio en una sola línea */
+.plan{display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:16px;border:1px solid var(--glass-brd);background:var(--glass-2);box-shadow:inset 0 1px 0 var(--glass-hi)}
+.plan>span:not(.insignia-plan){display:none}
+.plan b{white-space:nowrap}
+
+/* filtros segmentados como cápsula de vidrio */
+.seg{height:var(--btn-h);align-items:center;border-radius:999px;padding:4px;border:1px solid var(--glass-brd);background:var(--glass-2);box-shadow:inset 0 2px 4px var(--glass-lineal)}
+.seg button{height:100%;border-radius:999px;padding:0 14px}
