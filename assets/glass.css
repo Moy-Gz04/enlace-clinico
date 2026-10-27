@@ -149,3 +149,9 @@ input[type="file"].input{padding:8px 12px}
 /* filtros segmentados como cápsula de vidrio */
 .seg{height:var(--btn-h);align-items:center;border-radius:999px;padding:4px;border:1px solid var(--glass-brd);background:var(--glass-2);box-shadow:inset 0 2px 4px var(--glass-lineal)}
 .seg button{height:100%;border-radius:999px;padding:0 14px}
+
+/* acceso: solo el formulario, centrado; pie en una sola línea */
+.acc-main{grid-template-columns:minmax(0,440px)!important;justify-content:center}
+.acc-pie-corto{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 22px;padding-block:14px max(14px,env(safe-area-inset-bottom,0px));font-size:12.5px;color:var(--ink-3)}
+.acc-pie-links{display:inline-flex;gap:16px}
+.acc-pie-corto .acc-link{font-size:12.5px;color:var(--ink-2)}

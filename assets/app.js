@@ -419,23 +419,11 @@ function marcoAcceso(contenido){
     </header>
     <main class="acc-main">
       <div class="acc-col">${contenido}</div>
-      <aside class="acc-info" aria-label="Acerca del servicio">
-        <img class="acc-portada" src="assets/portada.jpg" alt="Assistant · Asistentes en línea">
-        <h2>Recepción médica para consultorios</h2>
-        <dl>
-          <div><dt>Para la recepción</dt><dd>Agenda citas en el horario de cada médico, emite tickets con QR y lleva el control de mensualidades.</dd></div>
-          <div><dt>Para el médico</dt><dd>Consulta tus citas del día con los datos del paciente y las notas de recepción.</dd></div>
-          <div><dt>Atención</dt><dd>${EMPRESA.horario}</dd></div>
-        </dl>
-      </aside>
     </main>
-    <footer class="acc-pie">
-      <div class="acc-pie-grid">
-        <section><b>Assistant</b><p>${esc(EMPRESA.razon)}</p><p>${esc(EMPRESA.domicilio)}</p></section>
-        <section><b>Contacto</b><p>Tel. <span class="num">${esc(EMPRESA.telefono)}</span></p><p>${esc(EMPRESA.correo)}</p><p>${esc(EMPRESA.horario)}</p></section>
-        <section><b>Legal</b><p><button type="button" class="acc-link" data-legal="privacidad">Aviso de privacidad</button></p><p><button type="button" class="acc-link" data-legal="terminos">Términos y condiciones</button></p><p><button type="button" class="acc-link" data-legal="seguridad">Seguridad de la cuenta</button></p></section>
-      </div>
-      <div class="acc-pie-legal"><span>© ${anio} ${esc(EMPRESA.razon)} Todos los derechos reservados.</span><span>Versión de pruebas · los datos se guardan solo en este navegador.</span></div>
+    <footer class="acc-pie acc-pie-corto">
+      <span>© ${anio} ${esc(EMPRESA.razon)}</span>
+      <span>Tel. <span class="num">${esc(EMPRESA.telefono)}</span> · ${esc(EMPRESA.correo)}</span>
+      <span class="acc-pie-links"><button type="button" class="acc-link" data-legal="privacidad">Aviso de privacidad</button><button type="button" class="acc-link" data-legal="terminos">Términos</button><button type="button" class="acc-link" data-legal="seguridad">Seguridad</button></span>
     </footer>
   </div>`;
 }
